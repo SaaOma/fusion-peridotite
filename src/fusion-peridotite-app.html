@@ -1,0 +1,1736 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Fusion de la péridotite</title>
+<script>
+  // Applique le thème enregistré avant le premier affichage (évite un flash du mauvais thème).
+  try { const t = localStorage.getItem('fusion-peridotite-v1-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="stylesheet" href="fonts/fonts.css">
+<script src="vendor/d3.min.js"></script>
+<script src="vendor/confetti.browser.js"></script>
+<style>
+/* Layout « projecteur » : sur grand écran, l'application occupe exactement la fenêtre (pas de défilement de page).
+   Barre d'étapes en haut ; chaque étape = diagramme P-T à gauche, onglets de travail à droite.
+   Seul le contenu d'un onglet défile si besoin. Sur petit écran, tout s'empile et la page défile normalement. */
+:root {
+  --bg: #f2f3ef;
+  --surface: #fdfdfb;
+  --surface-2: #e6e9e0;
+  --ink: #161a14;
+  --muted: #475042;
+  --line: #c3c9ba;
+  --olivine: #4f7a28;
+  --olivine-ink: #3c5f1d;
+  --olivine-soft: #e3ecd5;
+  --dry: #a0622a;
+  --wet: #1f69b0;
+  --magma: #d2461b;
+  --ridge: #7b4bb0;
+  --geo: #1d221b;
+  --reg-solid: #e7ebe0;
+  --reg-partial: #f5deb5;
+  --reg-liquid: #f2c2ad;
+  --ok: #2f7d32;
+  --ok-soft: #e1f0df;
+  --bad: #b3261e;
+  --bad-soft: #f8e1de;
+  --note-soft: #fbefd6;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", Consolas, "Courier New", monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141712; --surface: #1b1f18; --surface-2: #252b21; --ink: #e6e9e0; --muted: #9ba392; --line: #363d30;
+    --olivine: #9cc55f; --olivine-ink: #b9d98a; --olivine-soft: #27331b;
+    --dry: #dd9d58; --wet: #6aaae9; --magma: #ff7a4a; --ridge: #b58ce2; --geo: #e6e9e0;
+    --reg-solid: #1f241b; --reg-partial: #3f3320; --reg-liquid: #4a2820;
+    --ok: #7cc47f; --ok-soft: #1e3320; --bad: #ff8a80; --bad-soft: #3d1f1c; --note-soft: #362d1c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141712; --surface: #1b1f18; --surface-2: #252b21; --ink: #e6e9e0; --muted: #9ba392; --line: #363d30;
+  --olivine: #9cc55f; --olivine-ink: #b9d98a; --olivine-soft: #27331b;
+  --dry: #dd9d58; --wet: #6aaae9; --magma: #ff7a4a; --ridge: #b58ce2; --geo: #e6e9e0;
+  --reg-solid: #1f241b; --reg-partial: #3f3320; --reg-liquid: #4a2820;
+  --ok: #7cc47f; --ok-soft: #1e3320; --bad: #ff8a80; --bad-soft: #3d1f1c; --note-soft: #362d1c;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+/* Taille de base proportionnelle à la largeur : ≈17 px en 1280, ≈18 px en 1366, ≈21 px en 1920. */
+html { font-size: clamp(16px, 0.55vw + 10px, 22px); }
+html, body { margin: 0; overflow-x: clip; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 1rem/1.5 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; line-height: 1.15; text-wrap: balance; margin: 0; }
+h2 { font-size: clamp(1.45rem, 2.6vw, 1.95rem); letter-spacing: -0.01em; }
+h3 { font-size: 1.12rem; }
+p { margin: 0; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--wet); outline-offset: 2px; border-radius: 4px; }
+.mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.eyebrow { font: 600 0.74rem/1 var(--font-data); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+
+/* ---------- barre du haut ---------- */
+.topbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-inner {
+  max-width: 1320px; margin: 0 auto; padding: 10px 20px;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+.brand-mark { width: 30px; height: 30px; flex: none; }
+.brand b { font: 700 1.05rem/1.1 var(--font-display); display: block; }
+.brand span { font-size: 0.8rem; color: var(--muted); }
+.steps { display: flex; gap: 4px; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
+.step-tab {
+  display: flex; align-items: center; gap: 7px;
+  border: 1px solid transparent; background: none; cursor: pointer;
+  padding: 6px 11px 6px 7px; border-radius: 999px; font-size: 0.92rem; color: var(--muted);
+}
+.step-tab .num {
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  font: 600 0.75rem/1 var(--font-data); border: 1.5px solid currentColor;
+}
+.step-tab:hover { color: var(--ink); background: var(--surface-2); }
+.step-tab[aria-current="step"] { color: var(--ink); background: var(--surface); border-color: var(--line); font-weight: 600; }
+.step-tab[aria-current="step"] .num { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.step-tab.done .num { background: var(--olivine); border-color: var(--olivine); color: var(--surface); }
+.theme-btn { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 10px; cursor: pointer; font-size: 0.85rem; }
+
+/* ---------- pages ---------- */
+main { max-width: 1320px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; }
+.page { display: grid; gap: 22px; animation: rise .35s ease-out; }
+.page > *, .hero > *, .split > *, .keypoints > * { min-width: 0; }
+@keyframes rise { from { opacity: .4; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.page-head { display: grid; gap: 8px; max-width: 72ch; }
+.page-head p { color: var(--muted); }
+.split { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr); gap: 22px; align-items: start; }
+@media (max-width: 980px) { .split { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.panel-plain { display: grid; gap: 14px; min-width: 0; }
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 10px 12px; min-width: 0; }
+.figure-cap { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 4px 6px 8px; font-size: 0.85rem; color: var(--muted); }
+.sticky-fig { position: sticky; top: 80px; }
+@media (max-width: 980px) { .sticky-fig { position: static; } }
+
+.task { border-left: 3px solid var(--olivine); padding: 2px 0 2px 14px; display: grid; gap: 6px; }
+.task .eyebrow { color: var(--olivine-ink); }
+.callout { background: var(--note-soft); border-radius: 8px; padding: 12px 14px; font-size: 0.95rem; }
+.callout.info { background: var(--olivine-soft); }
+
+/* ---------- contrôles ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+  padding: 9px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.95rem;
+  border: 1px solid var(--line); background: var(--surface); transition: transform .12s, background .12s;
+}
+.btn:hover { background: var(--surface-2); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.primary:hover { background: color-mix(in srgb, var(--ink) 85%, var(--olivine)); }
+.btn.accent { background: var(--olivine); border-color: var(--olivine); color: var(--surface); }
+.btn.ghost { background: none; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--ink); background: var(--surface-2); }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.row.end { justify-content: flex-end; }
+
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; padding: 3px; background: var(--surface-2); gap: 3px; flex-wrap: wrap; }
+.seg button { border: 0; background: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.92rem; color: var(--muted); display: inline-flex; align-items: center; gap: 7px; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+.swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+
+.slider { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: end; }
+.slider input { grid-column: 1 / -1; grid-row: 2; }
+.slider label { font-weight: 600; font-size: 0.93rem; }
+.slider output { font: 600 0.9rem var(--font-data); font-variant-numeric: tabular-nums; min-width: 9.5ch; text-align: right; }
+.slider output small { display: block; font-weight: 400; color: var(--muted); font-size: 0.75rem; }
+input[type="range"] { width: 100%; accent-color: var(--ink); }
+
+.chk { display: inline-flex; gap: 7px; align-items: center; font-size: 0.92rem; cursor: pointer; }
+.chk input { accent-color: var(--ink); width: 16px; height: 16px; }
+
+input[type="text"], input[type="number"], select, textarea {
+  border: 1px solid var(--line); background: var(--bg); border-radius: 7px; padding: 7px 9px; width: 100%;
+}
+textarea { min-height: 96px; resize: vertical; line-height: 1.5; }
+.is-ok { border-color: var(--ok) !important; background: var(--ok-soft) !important; }
+.is-bad { border-color: var(--bad) !important; background: var(--bad-soft) !important; }
+
+/* lecture d'état */
+.readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.readout > div { padding: 10px 12px; display: grid; gap: 2px; background: var(--surface); }
+.readout > div + div { border-left: 1px solid var(--line); }
+.readout b { font: 600 1.15rem var(--font-data); font-variant-numeric: tabular-nums; }
+.readout span { font-size: 0.78rem; color: var(--muted); }
+.state-pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px; font-weight: 700; font-size: 0.92rem; border: 1.5px solid; }
+.state-pill.solid { color: var(--olivine-ink); border-color: var(--olivine); background: var(--olivine-soft); }
+.state-pill.partial { color: var(--magma); border-color: var(--magma); background: var(--reg-partial); }
+.state-pill.liquid { color: var(--bad); border-color: var(--bad); background: var(--reg-liquid); }
+.meltbar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.meltbar i { display: block; height: 100%; width: 0; background: var(--magma); transition: width .25s; }
+
+/* tableaux */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font: 600 0.72rem/1.2 var(--font-data); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.goto { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 2px 8px; font: 600 0.85rem var(--font-data); cursor: pointer; }
+.goto:hover { background: var(--surface-2); }
+td input, td select { min-width: 6.5rem; }
+
+/* retours */
+.feedback { border-radius: 8px; padding: 12px 14px; font-size: 0.95rem; display: grid; gap: 6px; }
+.feedback.ok { background: var(--ok-soft); border: 1px solid var(--ok); }
+.feedback.bad { background: var(--bad-soft); border: 1px solid var(--bad); }
+.feedback.info { background: var(--surface-2); border: 1px solid var(--line); }
+.hint { background: var(--note-soft); border-radius: 8px; padding: 10px 12px; font-size: 0.93rem; }
+.hint b { font-family: var(--font-data); font-size: 0.78rem; letter-spacing: .06em; text-transform: uppercase; display: block; margin-bottom: 2px; }
+
+/* diagramme */
+svg.dia { width: 100%; height: auto; display: block; font-family: var(--font-body); touch-action: none; user-select: none; }
+.dia .plot-bg { fill: var(--surface); }
+.dia .grid line { stroke: var(--line); stroke-width: 1; }
+/* tailles agrandies pour rester lisibles au projecteur (unités du viewBox 640 × 480) */
+.dia .axis text { fill: var(--ink); font: 15px var(--font-data); }
+.dia .axis line, .dia .axis path { stroke: var(--muted); stroke-width: 1.4; }
+.dia .axis .axis-title { fill: var(--ink); font: 700 16px var(--font-body); }
+.dia .reg-solid { fill: var(--reg-solid); }
+.dia .reg-partial { fill: var(--reg-partial); }
+.dia .reg-liquid { fill: var(--reg-liquid); }
+.dia .reg-label { fill: var(--ink); font: 700 16px var(--font-display); opacity: .8; }
+.dia .c-dry { stroke: var(--dry); fill: none; stroke-width: 3.6; }
+.dia .c-wet { stroke: var(--wet); fill: none; stroke-width: 3.6; }
+.dia .c-liq { stroke-dasharray: 9 6; stroke-width: 2.8; }
+.dia .c-est { stroke-dasharray: 3 6; stroke-width: 2.6; }
+.dia .t-dry { fill: var(--dry); font: 700 15.5px var(--font-body); }
+.dia .t-wet { fill: var(--wet); font: 700 15.5px var(--font-body); }
+.dia .geo-sub { stroke: var(--geo); stroke-width: 3.2; fill: none; }
+.dia .geo-ridge { stroke: var(--ridge); stroke-width: 3.2; fill: none; stroke-dasharray: 2 0; }
+.dia .t-geo { fill: var(--geo); font: italic 700 15.5px var(--font-body); }
+.dia .t-ridge { fill: var(--ridge); font: italic 700 15.5px var(--font-body); }
+.dia .magma-zone { fill: var(--magma); fill-opacity: .32; stroke: var(--magma); stroke-width: 1.8; }
+.dia .t-magma { fill: var(--magma); font: 700 15.5px var(--font-body); }
+.dia .halo { stroke: var(--surface); stroke-width: 5px; paint-order: stroke; stroke-linejoin: round; }
+.dia .probe-line { stroke: var(--ink); stroke-dasharray: 3 4; stroke-width: 1.4; opacity: .7; }
+.dia .probe-dot { stroke: var(--surface); stroke-width: 3; }
+.dia .probe-chip rect { fill: var(--ink); }
+.dia .probe-chip text { fill: var(--bg); font: 600 14px var(--font-data); }
+.dia .hit { fill: transparent; cursor: crosshair; }
+.dia .pick { fill: none; stroke: var(--ink); stroke-width: 2; }
+.dia .target { fill: none; stroke: var(--ok); stroke-width: 2; stroke-dasharray: 4 3; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 6px 0; font-size: 0.84rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 22px; height: 0; border-top: 3px solid; }
+.legend i.dash { border-top-style: dashed; }
+.legend i.box { width: 14px; height: 12px; border: 0; border-radius: 3px; }
+
+/* laboratoire */
+.lab-grid { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 16px; align-items: start; }
+@media (max-width: 620px) { .lab-grid { grid-template-columns: minmax(0, 1fr); } }
+.scope { display: grid; gap: 8px; justify-items: center; }
+.scope canvas { width: 100%; max-width: 250px; aspect-ratio: 1; border-radius: 50%; background: #111; box-shadow: 0 0 0 6px var(--surface-2), 0 0 0 7px var(--line); }
+.scope-cap { font-size: 0.8rem; color: var(--muted); text-align: center; }
+.minerals { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.78rem; color: var(--muted); justify-content: center; }
+.minerals span { display: inline-flex; gap: 5px; align-items: center; }
+.minerals i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.progress { display: grid; gap: 6px; }
+.progress-track { height: 6px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.progress-track i { display: block; height: 100%; width: 0; background: var(--ink); transition: width .3s linear; }
+.progress small { color: var(--muted); font-size: 0.82rem; }
+.runs td:first-child { color: var(--muted); }
+.tag { font: 600 0.68rem var(--font-data); text-transform: uppercase; letter-spacing: .06em; padding: 2px 6px; border-radius: 4px; background: var(--surface-2); color: var(--muted); }
+.sym { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; vertical-align: -1px; }
+.sym.solid { background: currentColor; }
+.sym.partial { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+
+/* situation */
+.hero { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 28px; align-items: center; }
+@media (max-width: 980px) { .hero { grid-template-columns: minmax(0, 1fr); } }
+.hero h1 { font-size: clamp(2rem, 4.4vw, 3.2rem); letter-spacing: -0.02em; }
+.hero h1 em { font-style: normal; color: var(--magma); }
+.lede { font-size: 1.1rem; color: var(--muted); max-width: 52ch; }
+.problem { border: 1.5px solid var(--ink); border-radius: var(--radius); padding: 14px 16px; font-weight: 600; font-size: 1.05rem; background: var(--surface); }
+.section-svg { width: 100%; height: auto; display: block; }
+.hyp { display: grid; gap: 8px; }
+.hyp label { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; cursor: pointer; background: var(--surface); }
+.hyp label:has(input:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.hyp input { margin-top: 4px; accent-color: var(--ink); }
+
+/* quiz & bilan */
+.quiz { display: grid; gap: 14px; }
+.q { border: 1px solid var(--line); border-radius: 9px; padding: 14px; background: var(--surface); display: grid; gap: 10px; align-content: start; }
+.q h3 { font-family: var(--font-body); font-size: 1rem; font-weight: 700; }
+.q .opts { display: grid; gap: 6px; }
+.q .opts label { display: flex; gap: 9px; align-items: flex-start; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--line); cursor: pointer; }
+.q .opts input { margin-top: 4px; accent-color: var(--ink); }
+.q .opts label.ok { border-color: var(--ok); background: var(--ok-soft); }
+.q .opts label.bad { border-color: var(--bad); background: var(--bad-soft); }
+.q .why { font-size: 0.92rem; color: var(--muted); }
+.keypoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 700px) { .keypoints { grid-template-columns: minmax(0, 1fr); } }
+.kp { border-top: 3px solid var(--ink); padding-top: 10px; display: grid; gap: 4px; align-content: start; }
+.kp:nth-child(2) { border-color: var(--dry); }
+.kp:nth-child(3) { border-color: var(--wet); }
+.kp:nth-child(4) { border-color: var(--magma); }
+.chain { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-weight: 600; font-size: 0.95rem; }
+.chain span { background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; }
+.chain b { color: var(--muted); font-weight: 400; }
+.sentence { min-height: 54px; border: 1.5px dashed var(--line); border-radius: 9px; padding: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sentence:empty::before { content: "La conclusion se construit ici…"; color: var(--muted); font-size: .92rem; }
+.bank { display: flex; flex-wrap: wrap; gap: 6px; }
+.chipw { border: 1px solid var(--line); background: var(--surface); border-radius: 7px; padding: 6px 10px; cursor: pointer; font-size: .93rem; text-align: left; }
+.chipw:hover { background: var(--surface-2); }
+.sentence .chipw { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.sentence .chipw.is-bad { color: var(--bad); }
+.oic { display: grid; gap: 8px; }
+.oic p { padding-left: 34px; position: relative; }
+.oic p::before { position: absolute; left: 0; top: 1px; font: 700 0.8rem var(--font-data); width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; background: var(--surface-2); }
+.oic p.o::before { content: "O"; }
+.oic p.i::before { content: "I"; }
+.oic p.c::before { content: "C"; }
+details.teacher { border: 1px dashed var(--line); border-radius: var(--radius); padding: 12px 16px; background: var(--surface); }
+details.teacher summary { cursor: pointer; font-weight: 700; }
+details.teacher ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: 0.94rem; }
+.foot-nav { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 18px; }
+
+/* ---------- en-tête d'étape : texte à gauche, navigation à droite ---------- */
+.top-tools { display: flex; gap: 6px; }
+.page-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px 28px; flex-wrap: wrap; }
+.page-top .page-head { max-width: 92ch; flex: 1 1 32rem; }
+.page-top .nav { flex: none; }
+.page-head p { font-size: 0.97rem; }
+.page-head h1 { font-size: clamp(1.6rem, 2.7vw, 2.6rem); letter-spacing: -0.02em; }
+.page-head h1 em { font-style: normal; color: var(--magma); white-space: nowrap; }
+.plan-list { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.tabpanel > .lede { font-size: 1.12rem; color: var(--ink); max-width: none; }
+
+/* ---------- onglets ---------- */
+.tabset { display: flex; flex-direction: column; min-width: 0; }
+.tablist { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 2px solid var(--line); }
+.tab {
+  border: 0; border-bottom: 3px solid transparent; margin-bottom: -2px; border-radius: 8px 8px 0 0;
+  background: none; cursor: pointer; padding: 9px 16px; font-weight: 600; font-size: 1rem; color: var(--muted);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.tab:hover { color: var(--ink); background: var(--surface-2); }
+.tab[aria-selected="true"] { color: var(--ink); background: var(--surface); border-bottom-color: var(--olivine); }
+.tab .badge { font-size: 0.75rem; background: var(--surface-2); border-radius: 99px; padding: 1px 8px; }
+.tab .badge:empty { display: none; }
+.tab.ready::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--magma); }
+.tabpanel { padding-top: 14px; display: grid; gap: 14px; align-content: start; min-height: 0; min-width: 0; }
+
+/* ---------- mode projecteur : l'application tient dans la fenêtre ---------- */
+@media (min-width: 981px) and (min-height: 560px) {
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { position: static; flex: none; }
+  .topbar-inner { max-width: 1800px; padding: 8px 24px; flex-wrap: nowrap; }
+  main { flex: 1; min-height: 0; width: 100%; max-width: 1800px; padding: 14px 24px 16px; display: flex; flex-direction: column; }
+  .page { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); gap: 14px; }
+  .page > .split { height: 100%; min-height: 0; align-items: stretch; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr); }
+  .split > .figure { display: flex; flex-direction: column; min-height: 0; margin: 0; }
+  .dia-host { position: relative; flex: 1; min-height: 0; }
+  .dia-host > svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .tabset { min-height: 0; }
+  .tabset > .tabpanel { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding-right: 6px; padding-bottom: 4px; }
+  .lab-grid { grid-template-columns: minmax(0, 1fr) minmax(190px, 36%); }
+  .scope canvas { max-width: 300px; }
+  .quiz { grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); }
+  .keypoints { gap: 18px 28px; }
+}
+@media (min-width: 981px) and (max-width: 1500px) {
+  .brand span, #themeLabel, #fsLabel { display: none; }
+}
+@media (min-width: 981px) and (max-width: 1200px) {
+  .brand > div { display: none; }
+  .topbar-inner { gap: 10px; }
+  .step-tab { padding: 5px 9px 5px 5px; }
+}
+@media (max-width: 980px), (max-height: 559px) {
+  .dia-host > svg.section-svg { height: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 30 30" aria-hidden="true">
+        <polygon points="4,7 13,3 19,9 15,17 6,15" fill="var(--olivine)"/>
+        <polygon points="19,9 27,7 26,17 15,17" fill="var(--dry)"/>
+        <polygon points="6,15 15,17 26,17 22,27 9,26" fill="var(--magma)"/>
+      </svg>
+      <div><b>Fusion de la péridotite</b><span>Géologie · 2e année bac SVT</span></div>
+    </div>
+    <ol class="steps" id="steps" aria-label="Étapes de l'activité"></ol>
+    <div class="top-tools">
+      <button class="theme-btn" id="themeBtn" type="button"><span id="themeIcon" aria-hidden="true"></span> <span id="themeLabel"></span></button>
+      <button class="theme-btn" id="fsBtn" type="button" title="Plein écran (F11)"><span aria-hidden="true">⛶</span> <span id="fsLabel">Plein écran</span></button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============ 0. SITUATION ============ -->
+<section class="page" data-step="0">
+  <div class="page-top">
+    <div class="page-head">
+      <p class="eyebrow">Situation-problème</p>
+      <h1>Pourquoi le manteau <em>fond-il</em> sous les volcans de subduction&nbsp;?</h1>
+    </div>
+    <div class="row nav"><button class="btn primary" type="button" data-next>Commencer l'expérience →</button></div>
+  </div>
+
+  <div class="split">
+    <figure class="figure">
+      <div class="figure-cap"><span>Coupe simplifiée d'une zone de subduction</span><span class="mono">échelle verticale approx.</span></div>
+      <div class="dia-host">
+      <svg class="section-svg" viewBox="0 0 720 330" role="img" aria-label="Coupe d'une zone de subduction : la plaque océanique plonge sous la plaque continentale ; vers 100 km, elle libère de l'eau qui hydrate la péridotite du coin du manteau, qui fond partiellement ; le magma remonte vers un volcan.">
+        <defs>
+          <marker id="arW" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--wet)"/></marker>
+          <marker id="arM" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--magma)"/></marker>
+          <pattern id="hatchMantle" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(30)"><line x1="0" y1="0" x2="0" y2="8" stroke="var(--olivine)" stroke-opacity=".18" stroke-width="2"/></pattern>
+        </defs>
+        <rect x="60" y="40" width="660" height="290" fill="var(--olivine-soft)"/>
+        <rect x="60" y="40" width="660" height="290" fill="url(#hatchMantle)"/>
+        <!-- océan -->
+        <path d="M60 40 H300 L290 64 Q200 54 60 50 Z" fill="var(--wet)" fill-opacity=".35"/>
+        <!-- plaque plongeante -->
+        <path d="M60 50 Q200 54 290 64 Q420 96 610 330 L520 330 Q380 140 280 112 Q170 96 60 98 Z" fill="var(--surface-2)" stroke="var(--muted)" stroke-width="1.5"/>
+        <path d="M60 50 Q200 54 290 64 Q420 96 610 330" fill="none" stroke="var(--ink)" stroke-width="2"/>
+        <!-- plaque continentale -->
+        <path d="M300 40 H720 V100 H430 Q360 92 300 64 Z" fill="var(--dry)" fill-opacity=".38" stroke="var(--dry)" stroke-width="1.5"/>
+        <!-- volcan -->
+        <path d="M455 40 L478 12 L486 12 L510 40 Z" fill="var(--dry)" stroke="var(--ink)" stroke-width="1.2"/>
+        <path d="M482 10 q-6 -6 0 -9 q6 -3 3 -8" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+        <!-- eau -->
+        <g stroke="var(--wet)" stroke-width="2" fill="none" marker-end="url(#arW)">
+          <path d="M488 188 q-8 -14 -4 -26"/>
+          <path d="M512 214 q-10 -14 -8 -28"/>
+          <path d="M466 166 q-8 -12 -4 -22"/>
+        </g>
+        <!-- magma -->
+        <ellipse cx="478" cy="138" rx="26" ry="15" fill="var(--magma)" fill-opacity=".85"/>
+        <path d="M478 122 C 476 96 482 70 482 44" stroke="var(--magma)" stroke-width="3" stroke-dasharray="5 4" fill="none" marker-end="url(#arM)"/>
+        <!-- profondeurs -->
+        <g font-family="var(--font-data)" font-size="13.5" fill="var(--ink)">
+          <line x1="56" y1="40" x2="56" y2="330" stroke="var(--muted)"/>
+          <line x1="50" y1="40" x2="56" y2="40" stroke="var(--muted)"/><text x="46" y="44" text-anchor="end">0</text>
+          <line x1="50" y1="115" x2="56" y2="115" stroke="var(--muted)"/><text x="46" y="119" text-anchor="end">50</text>
+          <line x1="50" y1="190" x2="56" y2="190" stroke="var(--muted)"/><text x="46" y="194" text-anchor="end">100</text>
+          <line x1="50" y1="265" x2="56" y2="265" stroke="var(--muted)"/><text x="46" y="269" text-anchor="end">150</text>
+          <text x="46" y="28" text-anchor="end">km</text>
+        </g>
+        <!-- légendes -->
+        <g font-size="15" font-family="var(--font-body)" fill="var(--ink)">
+          <text x="290" y="80" text-anchor="middle" font-weight="600">fosse</text>
+          <text x="92" y="82">lithosphère océanique</text>
+          <text x="330" y="196" transform="rotate(36 330 196)">plaque plongeante</text>
+          <text x="600" y="72" text-anchor="middle">croûte continentale</text>
+          <text x="556" y="140" font-weight="700">coin du manteau</text>
+          <text x="556" y="158">(péridotite)</text>
+          <text x="536" y="212" fill="var(--wet)" font-weight="700">libération d'eau</text>
+          <text x="400" y="132" fill="var(--magma)" font-weight="700" text-anchor="end">fusion partielle</text>
+          <text x="520" y="26" font-weight="600">volcan</text>
+        </g>
+      </svg>
+      </div>
+    </figure>
+
+    <div class="tabset" data-tabs="s0">
+      <div class="tablist" role="tablist" aria-label="Situation-problème">
+        <button class="tab" role="tab" type="button" data-tab="pb">Problème</button>
+        <button class="tab" role="tab" type="button" data-tab="hyp">Hypothèse</button>
+        <button class="tab" role="tab" type="button" data-tab="plan">Démarche</button>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="pb">
+        <p class="lede">Le manteau supérieur est formé de péridotite, une roche solide. Pourtant, au-dessus des zones de subduction, des volcans explosifs sont alimentés par du magma venu d'environ 100 km de profondeur. Et à cette profondeur, le géotherme de la zone de subduction est relativement froid.</p>
+        <p class="problem">Dans quelles conditions de température, de pression et d'hydratation la péridotite du manteau subit-elle une fusion partielle&nbsp;?</p>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="hyp">
+        <div class="panel">
+          <div class="task">
+            <p class="eyebrow">Avant de commencer</p>
+            <h3>Propose une hypothèse</h3>
+            <p>Choisis l'explication qui te semble la plus probable. Tu la confronteras aux résultats expérimentaux à la fin.</p>
+          </div>
+          <div class="hyp" id="hypList">
+            <label><input type="radio" name="hyp" value="pression" id="hyp-pression"> <span>La forte <b>pression</b> en profondeur fait fondre la péridotite.</span></label>
+            <label><input type="radio" name="hyp" value="eau" id="hyp-eau"> <span>L'<b>eau</b> libérée par la plaque plongeante abaisse la température de fusion de la péridotite.</span></label>
+            <label><input type="radio" name="hyp" value="chaleur" id="hyp-chaleur"> <span>La température du manteau est très <b>élevée</b> sous les volcans de subduction.</span></label>
+          </div>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="plan">
+        <div class="panel">
+          <div class="task">
+            <p class="eyebrow">Ce que tu vas faire</p>
+            <h3>Une démarche expérimentale en 5 temps</h3>
+          </div>
+          <ol class="plan-list">
+            <li><b>Expérimenter</b> : chauffer des échantillons de péridotite sèche ou hydratée sous pression, puis observer la lame mince.</li>
+            <li><b>Exploiter le diagramme</b> : lire l'état de la roche selon la température et la profondeur.</li>
+            <li><b>Comparer</b> : quantifier l'effet de l'eau et de la pression sur le solidus.</li>
+            <li><b>Appliquer</b> : localiser la fusion en zone de subduction et sous une dorsale.</li>
+            <li><b>Faire le bilan</b> : quiz et réponse rédigée type bac (méthode O-I-C).</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 1. LABORATOIRE ============ -->
+<section class="page" data-step="1" hidden>
+  <div class="page-top">
+    <div class="page-head">
+      <p class="eyebrow">Étape 1 · Expérimenter</p>
+      <h2>Chauffer la péridotite sous pression</h2>
+      <p>Dans une presse (piston-cylindre jusqu'à ~40 kbar, presse multi-enclumes au-delà), un fragment de péridotite est porté à une pression et une température choisies pendant plusieurs heures. Puis on le refroidit brutalement (trempe) : le liquide formé se fige en <b>verre</b>, visible au microscope entre les cristaux.</p>
+    </div>
+    <div class="row nav"><button class="btn" type="button" data-prev>← Retour</button><button class="btn primary" type="button" data-next>Exploiter le diagramme →</button></div>
+  </div>
+
+  <div class="split">
+    <div class="figure">
+      <div class="figure-cap"><span>Résultats reportés dans un diagramme T – profondeur</span><span id="labCount" class="mono"></span></div>
+      <div id="labDia" class="dia-host"></div>
+      <div class="legend">
+        <span><span class="sym solid" style="color:var(--ink)"></span> solide</span>
+        <span><span class="sym partial" style="color:var(--ink)"></span> solide + liquide</span>
+        <span><span class="sym" style="color:var(--ink)"></span> liquide</span>
+        <span><span class="swatch" style="background:var(--dry)"></span> péridotite sèche</span>
+        <span><span class="swatch" style="background:var(--wet)"></span> péridotite hydratée</span>
+      </div>
+    </div>
+
+    <div class="tabset" data-tabs="s1">
+      <div class="tablist" role="tablist" aria-label="Expérience">
+        <button class="tab" role="tab" type="button" data-tab="bench">Paillasse</button>
+        <button class="tab" role="tab" type="button" data-tab="runs">Mes résultats <span class="badge mono" id="runsBadge"></span></button>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="bench">
+        <div class="panel">
+          <div class="lab-grid">
+            <div style="display:grid;gap:14px;min-width:0;align-content:start">
+              <div>
+                <p class="eyebrow" style="margin-bottom:6px">Échantillon</p>
+                <div class="seg" id="labSample" role="group" aria-label="Échantillon">
+                  <button type="button" data-v="dry" aria-pressed="true"><span class="swatch" style="background:var(--dry)"></span>Péridotite sèche</button>
+                  <button type="button" data-v="wet" aria-pressed="false"><span class="swatch" style="background:var(--wet)"></span>Péridotite + eau</button>
+                </div>
+              </div>
+              <div class="slider">
+                <label for="labP">Pression</label>
+                <input type="range" id="labP" min="0" max="70" step="1" value="30">
+                <output id="labPOut"></output>
+              </div>
+              <div class="slider">
+                <label for="labT">Température</label>
+                <input type="range" id="labT" min="600" max="2000" step="25" value="1200">
+                <output id="labTOut"></output>
+              </div>
+              <div class="row">
+                <button class="btn primary" type="button" id="runBtn">▶ Lancer l'expérience</button>
+                <button class="btn ghost" type="button" id="clearRuns">Effacer mes résultats</button>
+              </div>
+              <div class="progress" id="runProgress" hidden>
+                <div class="progress-track"><i></i></div>
+                <small></small>
+              </div>
+            </div>
+            <div class="scope">
+              <canvas id="scope" width="500" height="500" aria-label="Lame mince de l'échantillon après trempe"></canvas>
+              <p class="scope-cap" id="scopeCap">Lame mince après trempe (LPNA)</p>
+              <div class="minerals">
+                <span><i style="background:#b9cf8a"></i>olivine</span>
+                <span><i style="background:#d8c7a0"></i>orthopyroxène</span>
+                <span><i style="background:#6fae6a"></i>clinopyroxène</span>
+                <span><i style="background:#2a1e14"></i>spinelle</span>
+                <span><i style="background:#c27b2e"></i>verre</span>
+              </div>
+            </div>
+          </div>
+          <div id="runResult" class="feedback info" aria-live="polite">Lance une expérience : le résultat s'affiche ici et se place sur le diagramme.</div>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="runs">
+        <div class="panel">
+          <div class="task">
+            <p class="eyebrow">Consigne</p>
+            <h3>Localise le début de la fusion pour chaque échantillon</h3>
+            <p>Fais au moins 3 expériences par échantillon, avec au moins un résultat <b>solide</b> et un résultat <b>solide + liquide</b>. Garde la même pression et change la température pour encadrer le début de la fusion.</p>
+          </div>
+          <div class="row">
+            <button class="btn accent" type="button" id="revealBtn">Tracer les courbes expérimentales</button>
+            <span id="revealMsg" style="font-size:.9rem;color:var(--muted)"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="runs">
+              <thead><tr><th>#</th><th>Échantillon</th><th>P (kbar)</th><th>Prof. (km)</th><th>T (°C)</th><th>Résultat</th></tr></thead>
+              <tbody id="runsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. DIAGRAMME ============ -->
+<section class="page" data-step="2" hidden>
+  <div class="page-top">
+    <div class="page-head">
+      <p class="eyebrow">Étape 2 · Exploiter le diagramme</p>
+      <h2>Lire l'état de la péridotite</h2>
+      <p>Fais glisser le point sur le diagramme (ou clique n'importe où). Le <b>solidus</b> sépare le domaine solide du domaine de fusion partielle ; le <b>liquidus</b> marque la fusion totale.</p>
+    </div>
+    <div class="row nav"><button class="btn" type="button" data-prev>← Retour</button><button class="btn primary" type="button" data-next>Comparer →</button></div>
+  </div>
+  <div class="split">
+    <div class="figure">
+      <div class="figure-cap">
+        <div class="seg" id="exSample" role="group" aria-label="Échantillon affiché">
+          <button type="button" data-v="dry" aria-pressed="true"><span class="swatch" style="background:var(--dry)"></span>Sèche</button>
+          <button type="button" data-v="wet" aria-pressed="false"><span class="swatch" style="background:var(--wet)"></span>Hydratée</button>
+          <button type="button" data-v="both" aria-pressed="false">Les deux</button>
+        </div>
+        <label class="chk"><input type="checkbox" id="exGeo"> géotherme de subduction</label>
+      </div>
+      <div id="exDia" class="dia-host"></div>
+      <div class="legend" id="exLegend"></div>
+    </div>
+
+    <div class="tabset" data-tabs="s2">
+      <div class="tablist" role="tablist" aria-label="Exploiter le diagramme">
+        <button class="tab" role="tab" type="button" data-tab="read">Lecture du point</button>
+        <button class="tab" role="tab" type="button" data-tab="table">Tableau à compléter</button>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="read">
+        <div class="panel">
+          <div class="row" style="justify-content:space-between">
+            <span class="state-pill solid" id="exPill">Solide</span>
+            <span class="mono" style="font-size:.85rem;color:var(--muted)" id="exSampleName"></span>
+          </div>
+          <div class="readout">
+            <div><span>Température</span><b id="exT">–</b></div>
+            <div><span>Profondeur</span><b id="exZ">–</b></div>
+            <div><span>Pression</span><b id="exP">–</b></div>
+          </div>
+          <div style="display:grid;gap:6px">
+            <div class="row" style="justify-content:space-between;font-size:.9rem"><span>Taux de fusion estimé</span><b class="mono" id="exF">0 %</b></div>
+            <div class="meltbar"><i id="exFBar"></i></div>
+          </div>
+          <p id="exMsg" style="font-size:.95rem"></p>
+          <div class="slider" id="hydRow" hidden>
+            <label for="exH">Hydratation</label>
+            <input type="range" id="exH" min="0" max="100" step="5" value="100">
+            <output id="exHOut"></output>
+          </div>
+          <p id="hydNote" class="callout" hidden style="font-size:.88rem">Modèle simplifié : l'eau abaisse fortement le solidus dès qu'elle est présente, puis l'effet plafonne quand la roche est <b>saturée en eau</b>. Ajouter de l'eau au-delà ne l'abaisse plus.</p>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="table">
+        <div class="panel">
+          <div class="task">
+            <p class="eyebrow">Consigne · Relevez</p>
+            <h3>Complète le tableau</h3>
+            <p>Clique sur la lettre d'un point pour y placer le curseur, puis indique la pression et l'état de la roche. Rappel : <span class="mono">P (kbar) ≈ profondeur (km) ÷ 3,3</span>.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Point</th><th>Échantillon</th><th>T (°C)</th><th>Prof. (km)</th><th>P (kbar)</th><th>État</th></tr></thead>
+              <tbody id="ptsBody"></tbody>
+            </table>
+          </div>
+          <div class="row">
+            <button class="btn primary" type="button" id="checkPts">Vérifier</button>
+            <button class="btn ghost" type="button" id="hintPts">Un indice</button>
+          </div>
+          <div id="ptsHint" class="hint" hidden></div>
+          <div id="ptsFb" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. COMPARER ============ -->
+<section class="page" data-step="3" hidden>
+  <div class="page-top">
+    <div class="page-head">
+      <p class="eyebrow">Étape 3 · Comparer et déduire</p>
+      <h2>Quel est l'effet de l'eau et de la pression&nbsp;?</h2>
+      <p>Les deux solidus sont superposés. Survole le diagramme pour lire les températures à n'importe quelle profondeur.</p>
+    </div>
+    <div class="row nav"><button class="btn" type="button" data-prev>← Retour</button><button class="btn primary" type="button" data-next>Appliquer →</button></div>
+  </div>
+  <div class="split">
+    <div class="figure">
+      <div class="figure-cap"><span>Solidus et liquidus de la péridotite sèche et hydratée</span><span class="mono" id="cmpRead">—</span></div>
+      <div id="cmpDia" class="dia-host"></div>
+      <div class="legend">
+        <span><i style="border-color:var(--dry)"></i> solidus sec</span>
+        <span><i class="dash" style="border-color:var(--dry)"></i> liquidus sec</span>
+        <span><i style="border-color:var(--wet)"></i> solidus hydraté (saturé en eau)</span>
+      </div>
+    </div>
+    <div class="tabset" data-tabs="s3">
+      <div class="tablist" role="tablist" aria-label="Comparer et déduire">
+        <button class="tab" role="tab" type="button" data-tab="cmp">Comparer</button>
+        <button class="tab" role="tab" type="button" data-tab="oic">Déduire (O-I-C)</button>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="cmp">
+        <div class="panel">
+          <div class="task">
+            <p class="eyebrow">Consigne · Comparez</p>
+            <h3>Relève puis compare</h3>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Question</th><th>Péridotite sèche</th><th>Péridotite hydratée</th></tr></thead>
+              <tbody>
+                <tr><td>Début de fusion à 100 km (°C)</td><td><input type="number" id="c-t-dry" placeholder="≈ … °C"></td><td><input type="number" id="c-t-wet" placeholder="≈ … °C"></td></tr>
+                <tr><td>Quand la profondeur augmente de 0 à 80 km, la température du solidus…</td>
+                  <td><select id="c-p-dry"><option value="">—</option><option value="aug">augmente</option><option value="dim">diminue</option><option value="cst">reste constante</option></select></td>
+                  <td><select id="c-p-wet"><option value="">—</option><option value="aug">augmente</option><option value="dim">diminue</option><option value="cst">reste constante</option></select></td></tr>
+                <tr><td>L'eau rend la fusion…</td><td style="color:var(--muted)">sans objet</td>
+                  <td><select id="c-w"><option value="">—</option><option value="easy">plus facile (solidus abaissé)</option><option value="hard">plus difficile (solidus relevé)</option><option value="none">sans effet</option></select></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="row">
+            <button class="btn primary" type="button" id="checkCmp">Vérifier</button>
+            <button class="btn ghost" type="button" id="hintCmp">Un indice</button>
+          </div>
+          <div id="cmpHint" class="hint" hidden></div>
+          <div id="cmpFb" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="oic">
+        <div class="panel">
+          <div class="task">
+            <p class="eyebrow">Consigne · Déduisez</p>
+            <h3>Rédige ta déduction (méthode O-I-C)</h3>
+            <p>Que peut-on déduire de la comparaison des deux solidus à 100 km&nbsp;? Cite des valeurs lues sur le diagramme.</p>
+          </div>
+          <textarea id="oicText" placeholder="Observation : à 100 km, …&#10;Interprétation : …&#10;Conclusion : …"></textarea>
+          <div class="row">
+            <button class="btn" type="button" id="showModel">Comparer avec une réponse modèle</button>
+            <span id="modelMsg" style="font-size:.88rem;color:var(--muted)"></span>
+          </div>
+          <div class="oic" id="modelAnswer" hidden></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4. CONTEXTES ============ -->
+<section class="page" data-step="4" hidden>
+  <div class="page-top">
+    <div class="page-head">
+      <p class="eyebrow">Étape 4 · Appliquer</p>
+      <h2>Où le manteau fond-il réellement&nbsp;?</h2>
+      <p>Un <b>géotherme</b> donne la température réelle en fonction de la profondeur. La fusion partielle commence là où le géotherme <b>recoupe</b> un solidus.</p>
+    </div>
+    <div class="row nav"><button class="btn" type="button" data-prev>← Retour</button><button class="btn primary" type="button" data-next>Bilan →</button></div>
+  </div>
+  <div class="split">
+    <div class="figure">
+      <div class="figure-cap">
+        <div class="seg" id="ctxSel" role="group" aria-label="Contexte géodynamique">
+          <button type="button" data-v="sub" aria-pressed="true"><span class="swatch" style="background:var(--geo)"></span>Zone de subduction</button>
+          <button type="button" data-v="ridge" aria-pressed="false"><span class="swatch" style="background:var(--ridge)"></span>Dorsale</button>
+        </div>
+        <span class="mono" id="ctxRead">Clique sur le diagramme</span>
+      </div>
+      <div id="ctxDia" class="dia-host"></div>
+      <div class="legend" id="ctxLegend"></div>
+    </div>
+    <div class="tabset" data-tabs="s4">
+      <div class="tablist" role="tablist" aria-label="Appliquer">
+        <button class="tab" role="tab" type="button" data-tab="task">Déterminer</button>
+        <button class="tab" role="tab" type="button" data-tab="sum" id="ctxSumTab">Deux contextes</button>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="task">
+        <div class="panel" id="ctxTaskSub">
+          <div class="task">
+            <p class="eyebrow">Zone de subduction · Déterminez</p>
+            <h3>Clique sur le point où commence la fusion partielle</h3>
+            <p>Compare le géotherme de la zone de subduction avec chacun des deux solidus. Quelle péridotite peut fondre&nbsp;? À quelle profondeur et quelle température&nbsp;?</p>
+          </div>
+          <div class="row"><button class="btn ghost" type="button" id="hintSub">Un indice</button></div>
+          <div id="subHint" class="hint" hidden></div>
+          <div id="subFb" aria-live="polite"></div>
+        </div>
+        <div class="panel" id="ctxTaskRidge" hidden>
+          <div class="task">
+            <p class="eyebrow">Dorsale · Déterminez</p>
+            <h3>Clique sur le point où commence la fusion partielle</h3>
+            <p>Sous une dorsale, le manteau chaud remonte. Il se refroidit très peu en montant mais la pression diminue (décompression).</p>
+          </div>
+          <div class="row"><button class="btn ghost" type="button" id="hintRidge">Un indice</button></div>
+          <div id="ridgeHint" class="hint" hidden></div>
+          <div id="ridgeFb" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="tabpanel" role="tabpanel" data-panel="sum">
+        <p class="feedback info" id="ctxLocked">Trouve d'abord le début de la fusion en <b>zone de subduction</b> et sous la <b>dorsale</b> (choix au-dessus du diagramme) : le tableau de synthèse s'affichera ici.</p>
+        <div class="panel" id="ctxCompare" hidden>
+          <h3>Deux contextes, deux mécanismes</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th></th><th>Zone de subduction</th><th>Dorsale</th></tr></thead>
+              <tbody>
+                <tr><td>Péridotite qui fond</td><td>hydratée (coin du manteau)</td><td>sèche (manteau ascendant)</td></tr>
+                <tr><td>Début de fusion</td><td class="mono" id="sumSub">–</td><td class="mono" id="sumRidge">–</td></tr>
+                <tr><td>Cause de la fusion</td><td>apport d'eau → solidus abaissé</td><td>décompression adiabatique</td></tr>
+                <tr><td>Magma, volcanisme</td><td>riche en eau, visqueux (andésite) → volcanisme explosif</td><td>basaltique, fluide → volcanisme effusif</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="callout info" style="font-size:.93rem">D'où vient l'eau&nbsp;? La croûte océanique contient des minéraux hydroxylés (amphibole, chlorite, serpentine…). En s'enfonçant, elle subit un métamorphisme (faciès schiste bleu puis éclogite) : ces minéraux se déstabilisent et libèrent de l'eau, surtout entre ~80 et ~150 km. Cette eau monte dans le coin du manteau et l'hydrate.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5. BILAN ============ -->
+<section class="page" data-step="5" hidden>
+  <div class="page-top">
+    <div class="page-head">
+      <p class="eyebrow">Étape 5 · Bilan</p>
+      <h2>Ce que montrent les expériences</h2>
+      <p id="hypBack"></p>
+    </div>
+    <div class="row nav"><button class="btn" type="button" data-prev>← Retour</button><button class="btn ghost" type="button" id="resetAll">Tout recommencer</button></div>
+  </div>
+
+  <div class="tabset tabset-full" data-tabs="s5">
+    <div class="tablist" role="tablist" aria-label="Bilan">
+      <button class="tab" role="tab" type="button" data-tab="kp">À retenir</button>
+      <button class="tab" role="tab" type="button" data-tab="conc">Construire la conclusion</button>
+      <button class="tab" role="tab" type="button" data-tab="quiz">Quiz</button>
+      <button class="tab" role="tab" type="button" data-tab="bac">Réponse type bac</button>
+    </div>
+
+    <div class="tabpanel" role="tabpanel" data-panel="kp">
+      <div class="keypoints">
+        <div class="kp"><h3>Pas de température de fusion unique</h3><p>La péridotite fond <b>progressivement</b> entre le solidus (début de fusion) et le liquidus (fusion totale). Dans le manteau, la fusion reste <b>partielle</b> : quelques % à ~25 % de liquide. Le clinopyroxène fond en premier, l'olivine en dernier.</p></div>
+        <div class="kp"><h3>La pression élève le solidus sec</h3><p>Plus la profondeur augmente, plus il faut chauffer la péridotite sèche pour la faire fondre (≈1 270 °C à 50 km, ≈1 440 °C à 100 km). À l'inverse, une <b>baisse de pression</b> (décompression) déclenche la fusion : c'est le cas sous les dorsales.</p></div>
+        <div class="kp"><h3>L'eau abaisse fortement le solidus</h3><p>Saturée en eau, la péridotite commence à fondre vers <b>800–850 °C</b> à 100 km, soit environ <b>600 °C de moins</b> que la péridotite sèche. Entre 0 et ~80 km, le solidus hydraté baisse même quand la profondeur augmente.</p></div>
+        <div class="kp"><h3>En subduction, l'eau vient de la plaque</h3><p>Le géotherme de subduction ne recoupe que le solidus hydraté, vers 80–100 km. La fusion partielle concerne la <b>péridotite du coin du manteau</b>, hydratée par l'eau libérée par le métamorphisme de la plaque plongeante. Ce magma alimente le <b>volcanisme d'arc</b> (ex. la ceinture de feu du Pacifique, les Andes).</p></div>
+      </div>
+      <div class="panel">
+        <p class="eyebrow">Chaîne logique à retenir</p>
+        <div class="chain">
+          <span>Subduction</span><b>→</b><span>métamorphisme de la plaque plongeante</span><b>→</b><span>libération d'eau</span><b>→</b><span>hydratation de la péridotite du manteau</span><b>→</b><span>abaissement du solidus</span><b>→</b><span>fusion partielle</span><b>→</b><span>magma (andésite, granodiorite)</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabpanel" role="tabpanel" data-panel="conc">
+      <div class="panel">
+        <div class="task">
+          <p class="eyebrow">Construis la conclusion</p>
+          <h3>Remets les éléments dans l'ordre logique</h3>
+          <p>Clique sur les étiquettes pour construire la phrase, et clique sur une étiquette déjà placée pour la retirer. Attention : certaines étiquettes sont fausses.</p>
+        </div>
+        <div class="sentence" id="concSentence" aria-live="polite"></div>
+        <div class="bank" id="concBank"></div>
+        <div class="row">
+          <button class="btn primary" type="button" id="checkConc">Vérifier</button>
+          <button class="btn ghost" type="button" id="resetConc">Recommencer</button>
+        </div>
+        <div id="concFb" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <div class="tabpanel" role="tabpanel" data-panel="quiz">
+      <div class="task"><p class="eyebrow">Quiz de validation</p><h3>Six questions, avec correction expliquée</h3></div>
+      <div class="quiz" id="quiz"></div>
+      <div class="row"><button class="btn primary" type="button" id="checkQuiz">Corriger le quiz</button><span id="quizScore" class="mono" style="font-weight:600"></span></div>
+    </div>
+
+    <div class="tabpanel" role="tabpanel" data-panel="bac">
+      <div class="panel">
+        <div class="task"><p class="eyebrow">Réponse type bac</p><h3>Expliquez la genèse du magma en zone de subduction à partir du diagramme.</h3></div>
+        <div class="oic">
+          <p class="o"><b>Observation</b> : le géotherme de la zone de subduction reste à gauche du solidus de la péridotite sèche à toutes les profondeurs, mais il recoupe le solidus de la péridotite hydratée vers 80–100 km, à environ 800–900 °C.</p>
+          <p class="i"><b>Interprétation</b> : au-delà de ce point, les conditions de pression et de température dépassent le solidus hydraté : la péridotite hydratée subit une fusion partielle, alors que la péridotite sèche resterait solide. L'eau provient de la déshydratation des minéraux de la plaque plongeante lors de son métamorphisme.</p>
+          <p class="c"><b>Conclusion</b> : en zone de subduction, le magma résulte de la fusion partielle de la péridotite du manteau sus-jacent, rendue possible par son hydratation qui abaisse son solidus.</p>
+        </div>
+      </div>
+      <details class="teacher">
+        <summary>Pour l'enseignant : modèle scientifique et sources</summary>
+        <ul>
+          <li><b>Solidus et liquidus secs</b> : paramétrisation de Katz, Spiegelman &amp; Langmuir (2003, <i>G³</i>) pour une lherzolite. T<sub>sol</sub> = 1085,7 + 132,9·P − 5,1·P² ; T<sub>liq</sub> = 1780 + 45·P − 2·P² (P en GPa).</li>
+          <li><b>Solidus hydraté (saturé en eau)</b> : courbe lissée d'après Grove et al. (2006, <i>EPSL</i>) et Kawamoto &amp; Holloway (1997). Pente négative jusqu'à ~3 GPa, minimum ≈ 800 °C, puis remontée lente.</li>
+          <li><b>Liquidus hydraté</b> : peu contraint expérimentalement, il est tracé en pointillés comme simple estimation.</li>
+          <li><b>Taux de fusion</b> : F = ((T − T<sub>sol</sub>)/(T<sub>liq</sub> − T<sub>sol</sub>))<sup>1,5</sup>. La loi n'est pas linéaire : près du solidus, il se forme très peu de liquide.</li>
+          <li><b>Conversion</b> : P (kbar) = profondeur (km) / 3,3, soit 1 GPa ≈ 33 km. Approximation scolaire (ρ ≈ 3,1–3,3 g/cm³).</li>
+          <li><b>Géotherme de subduction</b> : courbe pédagogique (15 °C en surface, ≈ 930 °C à 100 km). Il recoupe le solidus hydraté vers 80 km, ce qui est cohérent avec les attendus du bac (zone de fusion entre 80 et 160 km, 800–1 200 °C). <b>Dorsale</b> : adiabat de température potentielle ≈ 1 330 °C (+0,45 °C/km), qui recoupe le solidus sec vers 75 km.</li>
+          <li><b>Corrections par rapport au TP « La fusion des roches du manteau terrestre »</b> : l'axe des pressions était en GPa (0–70 GPa) alors que les valeurs correspondent à des kbar (30 GPa ≈ 850 km de profondeur, dans le manteau inférieur) ; le liquidus sec commençait à 1 400 °C (≈ 1 780 °C mesuré) ; le solidus hydraté commençait à 800 °C en surface puis montait avec la pression (en réalité il est égal au solidus sec en surface puis baisse jusqu'à ~80 km) ; le constructeur de conclusion triait les mots automatiquement.</li>
+          <li><b>Corrections par rapport à la version précédente (péridotite6)</b> : le géotherme partait de 500 °C en surface ; le solidus sec était trop bas en profondeur (≈ 1 185 °C au lieu de ≈ 1 440 °C à 100 km) ; la pente du solidus hydraté était positive, et la réponse « augmente » était donc attendue à tort ; le libellé « 150 km = 50 kbar » ne respectait pas la conversion (≈ 45 kbar) ; le taux de fusion était linéaire ; l'effet de l'eau n'avait pas de limite (pas de saturation).</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+/* =========================================================
+   MODÈLE SCIENTIFIQUE
+   P en GPa, z en km, T en °C. P(kbar) = z / 3,3.
+   ========================================================= */
+const KM_PER_KBAR = 3.3;
+const zToKbar = z => z / KM_PER_KBAR;
+const zToGPa  = z => z / (KM_PER_KBAR * 10);
+
+const solDry = P => 1085.7 + 132.9 * P - 5.1 * P * P;             // Katz et al. 2003
+const liqDry = P => 1780 + 45 * P - 2 * P * P;                     // Katz et al. 2003
+const solWetSat = P => Math.min(solDry(P), 790 + 310 * Math.exp(-P) + 8 * Math.max(0, P - 2.5) ** 2); // d'après Grove 2006
+const hydFactor = h => Math.pow(Math.max(0, Math.min(1, h)), 0.6);
+const solidus  = (z, h) => { const P = zToGPa(z), f = hydFactor(h); return solDry(P) - f * (solDry(P) - solWetSat(P)); };
+const liquidus = (z, h) => { const P = zToGPa(z), f = hydFactor(h); return liqDry(P) - f * 250 * (1 - Math.exp(-P / 1.5)); };
+function meltFraction(T, z, h) {
+  const s = solidus(z, h), l = liquidus(z, h);
+  if (T < s) return 0;
+  if (T >= l) return 1;
+  return Math.pow((T - s) / (l - s), 1.5);
+}
+function stateOf(T, z, h) {
+  const F = meltFraction(T, z, h);
+  return { F, key: F === 0 ? 'solid' : F >= 1 ? 'liquid' : 'partial' };
+}
+const geoSub   = z => 15 + 1335 * (1 - Math.exp(-z / 85));
+const geoRidge = z => z < 6 ? 15 + (1332.7 - 15) * z / 6 : 1330 + 0.45 * z;
+
+// intersection géotherme / solidus (bissection sur la profondeur)
+function crossing(geo, h, z0 = 1, z1 = 240) {
+  const g = z => geo(z) - solidus(z, h);
+  let a = z0, b = z1;
+  if (Math.sign(g(a)) === Math.sign(g(b))) return null;
+  for (let i = 0; i < 50; i++) { const m = (a + b) / 2; Math.sign(g(m)) === Math.sign(g(a)) ? a = m : b = m; }
+  const z = (a + b) / 2;
+  return { z, T: geo(z) };
+}
+const SUB_X = crossing(geoSub, 1);
+const RIDGE_X = crossing(geoRidge, 0, 10, 240);
+
+const STATE_LABEL = { solid: 'Solide', partial: 'Solide + liquide', liquid: 'Liquide' };
+const SAMPLE_LABEL = { dry: 'Péridotite sèche', wet: 'Péridotite hydratée' };
+const fmtT = t => Math.round(t).toLocaleString('fr-FR') + ' °C';
+const fmtKbar = z => zToKbar(z).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' kbar';
+const pct = F => (F * 100).toLocaleString('fr-FR', { maximumFractionDigits: F < 0.1 ? 1 : 0 }) + ' %';
+
+/* =========================================================
+   STOCKAGE (facultatif)
+   ========================================================= */
+const STORE_KEY = 'fusion-peridotite-v1';
+function load() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch (e) { return {}; } }
+function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) {} }
+
+const EXAMPLE_RUNS = [
+  { sample: 'dry', z: 49.5, T: 1200, ex: true },
+  { sample: 'dry', z: 49.5, T: 1400, ex: true },
+  { sample: 'wet', z: 49.5, T: 1000, ex: true },
+];
+const S = Object.assign({
+  step: 0, done: {}, hyp: null,
+  runs: EXAMPLE_RUNS.slice(), revealed: false,
+  table: {}, cmp: {}, oic: '', quiz: {},
+}, load());
+// Réglages de l'interface (curseurs, choix d'échantillon, point du diagramme, contexte)
+S.set = Object.assign({
+  labSample: 'dry', labP: 30, labT: 1200,
+  exSample: 'dry', exH: 1, exGeo: false, exProbe: { T: 1200, z: 100 },
+  ctxWhich: 'sub',
+}, S.set);
+
+/* =========================================================
+   DIAGRAMME (D3)
+   ========================================================= */
+function Diagram(host, opts = {}) {
+  const W = 640, H = 480, // format élargi : remplit mieux la colonne en mode projecteur
+  m = { t: 60, r: 66, b: 18, l: 62 };
+  const x = d3.scaleLinear([0, 2000], [m.l, W - m.r]);
+  const y = d3.scaleLinear([0, 240], [m.t, H - m.b]);
+  const uid = 'd' + Math.random().toString(36).slice(2, 8);
+  const svg = d3.select(host).append('svg').attr('class', 'dia').attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('role', 'img').attr('aria-label', opts.label || 'Diagramme température – profondeur de la fusion de la péridotite');
+  svg.append('clipPath').attr('id', uid).append('rect').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b);
+  svg.append('rect').attr('class', 'plot-bg').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b);
+  const clip = `url(#${uid})`;
+  const gReg = svg.append('g').attr('clip-path', clip);
+  const gGrid = svg.append('g').attr('class', 'grid');
+  const gZone = svg.append('g').attr('clip-path', clip);
+  const gCurves = svg.append('g').attr('clip-path', clip);
+  const gLabels = svg.append('g');
+  const gPts = svg.append('g');
+  const gAxes = svg.append('g').attr('class', 'axis');
+  const gProbe = svg.append('g');
+  const hit = svg.append('rect').attr('class', 'hit').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b);
+
+  // grille
+  d3.range(250, 2000, 250).forEach(t => gGrid.append('line').attr('x1', x(t)).attr('x2', x(t)).attr('y1', m.t).attr('y2', H - m.b));
+  d3.range(40, 240, 40).forEach(z => gGrid.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(z)).attr('y2', y(z)));
+
+  // axes : T en haut, profondeur à gauche, pression à droite
+  gAxes.append('g').attr('transform', `translate(0,${m.t})`).call(d3.axisTop(x).tickValues(d3.range(0, 2001, 250)).tickFormat(d => d % 500 ? '' : d).tickSizeOuter(0));
+  gAxes.append('g').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).tickValues(d3.range(0, 241, 40)).tickSizeOuter(0));
+  const yk = d3.scaleLinear([0, 240 / KM_PER_KBAR], [m.t, H - m.b]);
+  gAxes.append('g').attr('transform', `translate(${W - m.r},0)`).call(d3.axisRight(yk).tickValues(d3.range(0, 71, 10)).tickSizeOuter(0));
+  gAxes.append('text').attr('class', 'axis-title').attr('x', (m.l + W - m.r) / 2).attr('y', 22).attr('text-anchor', 'middle').text('Température (°C)');
+  gAxes.append('text').attr('class', 'axis-title').attr('transform', `translate(18,${(m.t + H - m.b) / 2}) rotate(-90)`).attr('text-anchor', 'middle').text('Profondeur (km)');
+  gAxes.append('text').attr('class', 'axis-title').attr('transform', `translate(${W - 14},${(m.t + H - m.b) / 2}) rotate(90)`).attr('text-anchor', 'middle').text('Pression (kbar)');
+
+  const zs = d3.range(0, 240.5, 1);
+  const line = f => d3.line().x(z => x(Math.min(2100, f(z)))).y(z => y(z))(zs);
+  const area = (f0, f1) => d3.area().y(z => y(z)).x0(z => x(Math.max(0, Math.min(2100, f0(z))))).x1(z => x(Math.max(0, Math.min(2100, f1(z)))))(zs);
+
+  let state = {}, onMove = null, onPick = null, onHover = null;
+
+  function render(st) {
+    state = Object.assign({}, state, st);
+    const s = state;
+    // domaines
+    gReg.selectAll('*').remove();
+    if (s.shade) {
+      const h = s.shade === 'wet' ? s.h ?? 1 : 0;
+      gReg.append('path').attr('class', 'reg-solid').attr('d', area(() => 0, z => solidus(z, h)));
+      gReg.append('path').attr('class', 'reg-partial').attr('d', area(z => solidus(z, h), z => liquidus(z, h)));
+      gReg.append('path').attr('class', 'reg-liquid').attr('d', area(z => liquidus(z, h), () => 2100));
+    }
+    // zone de fusion (géotherme au-delà du solidus hydraté)
+    gZone.selectAll('*').remove();
+    if (s.magma) {
+      const zz = zs.filter(z => z >= 60 && z <= 170 && geoSub(z) > solidus(z, 1));
+      if (zz.length) {
+        const p = d3.area().y(z => y(z)).x0(z => x(solidus(z, 1))).x1(z => x(geoSub(z)))(zz);
+        gZone.append('path').attr('class', 'magma-zone').attr('d', p);
+      }
+    }
+    // courbes
+    gCurves.selectAll('*').remove();
+    gLabels.selectAll('*').remove();
+    // dx < 0 : étiquette à gauche de la courbe, alignée sur sa fin (indépendant de la taille de police)
+    const lbl = (cls, z, f, text, dx = 6) => gLabels.append('text').attr('class', cls + ' halo')
+      .attr('x', x(f(z)) + (dx < 0 ? -8 : dx)).attr('y', y(z)).attr('text-anchor', dx < 0 ? 'end' : 'start').text(text);
+    if (s.curves !== false) {
+      if (s.dry) {
+        gCurves.append('path').attr('class', 'c-dry').attr('d', line(z => solidus(z, 0)));
+        gCurves.append('path').attr('class', 'c-dry c-liq').attr('d', line(z => liquidus(z, 0)));
+        lbl('t-dry', 150, z => solidus(z, 0), 'solidus sec');
+        lbl('t-dry', 60, z => liquidus(z, 0), 'liquidus', -54);
+      }
+      if (s.wet) {
+        const h = s.h ?? 1;
+        gCurves.append('path').attr('class', 'c-wet').attr('d', line(z => solidus(z, h)));
+        if (s.wetLiq) gCurves.append('path').attr('class', 'c-wet c-est').attr('d', line(z => liquidus(z, h)));
+        lbl('t-wet', 205, z => solidus(z, h), h >= 0.999 ? 'solidus hydraté' : 'solidus (partiellement hydraté)');
+        if (s.wetLiq) lbl('t-wet', 120, z => liquidus(z, h), 'liquidus estimé', -100);
+      }
+    }
+    if (s.geoSub) {
+      gCurves.append('path').attr('class', 'geo-sub').attr('d', line(geoSub));
+      gLabels.append('text').attr('class', 't-geo halo').attr('x', x(geoSub(32)) + 8).attr('y', y(32)).text('géotherme de subduction');
+    }
+    if (s.geoRidge) {
+      gCurves.append('path').attr('class', 'geo-ridge').attr('d', line(geoRidge));
+      gLabels.append('text').attr('class', 't-ridge halo').attr('x', x(geoRidge(225)) - 8).attr('y', y(225)).attr('text-anchor', 'end').text('géotherme de dorsale');
+    }
+    if (s.magma) {
+      gLabels.append('text').attr('class', 't-magma halo').attr('x', x(1010)).attr('y', y(150)).text('zone de fusion partielle');
+    }
+    if (s.shade && s.regionLabels !== false) {
+      const h = s.shade === 'wet' ? s.h ?? 1 : 0;
+      const rl = (T, z, t) => gLabels.append('text').attr('class', 'reg-label halo').attr('x', x(T)).attr('y', y(z)).attr('text-anchor', 'middle').text(t);
+      rl(Math.min(500, solidus(200, h) - 200), 200, 'SOLIDE');
+      rl((solidus(22, h) + liquidus(22, h)) / 2, 22, 'SOLIDE + LIQUIDE');
+      rl(1940, 16, 'LIQ.');
+    }
+    // points expérimentaux / points du tableau
+    gPts.selectAll('*').remove();
+    (s.points || []).forEach(p => {
+      const c = p.sample === 'wet' ? 'var(--wet)' : 'var(--dry)';
+      const g = gPts.append('g').attr('transform', `translate(${x(p.T)},${y(p.z)})`);
+      if (p.kind === 'letter') {
+        g.append('circle').attr('r', 11).attr('fill', 'var(--surface)').attr('stroke', c).attr('stroke-width', 2);
+        g.append('text').attr('text-anchor', 'middle').attr('dy', 4.5).attr('font-size', 12).attr('font-weight', 700).attr('fill', c).text(p.id);
+        return;
+      }
+      g.append('circle').attr('r', 6.5).attr('fill', p.state === 'solid' ? c : 'var(--surface)').attr('stroke', c).attr('stroke-width', 2.2);
+      if (p.state === 'partial') g.append('path').attr('d', d3.arc()({ innerRadius: 0, outerRadius: 6.5, startAngle: Math.PI, endAngle: 2 * Math.PI })).attr('fill', c);
+      if (p.latest) g.append('circle').attr('r', 12).attr('fill', 'none').attr('stroke', c).attr('stroke-width', 1.5).attr('stroke-dasharray', '2 3');
+    });
+    // marque de clic (contextes)
+    if (s.pick) gPts.append('circle').attr('class', 'pick').attr('cx', x(s.pick.T)).attr('cy', y(s.pick.z)).attr('r', 9);
+    if (s.target) gPts.append('circle').attr('class', 'target').attr('cx', x(s.target.T)).attr('cy', y(s.target.z)).attr('r', 16);
+    drawProbe();
+  }
+
+  function drawProbe() {
+    gProbe.selectAll('*').remove();
+    const p = state.probe;
+    if (!p) return;
+    const h = state.shade === 'wet' ? state.h ?? 1 : 0;
+    const st = stateOf(p.T, p.z, h).key;
+    const col = st === 'solid' ? 'var(--olivine)' : st === 'partial' ? 'var(--magma)' : 'var(--bad)';
+    const px = x(p.T), py = y(p.z);
+    gProbe.append('line').attr('class', 'probe-line').attr('x1', px).attr('x2', px).attr('y1', m.t).attr('y2', py);
+    gProbe.append('line').attr('class', 'probe-line').attr('x1', m.l).attr('x2', px).attr('y1', py).attr('y2', py);
+    gProbe.append('circle').attr('class', 'probe-dot').attr('cx', px).attr('cy', py).attr('r', 9).attr('fill', col);
+    const label = `${Math.round(p.T)} °C · ${Math.round(p.z)} km`;
+    const chip = gProbe.append('g').attr('class', 'probe-chip');
+    const tw = label.length * 8.5 + 16;
+    const cx = Math.min(Math.max(px - tw / 2, m.l + 2), W - m.r - tw - 2);
+    const cy = py - 40 < m.t + 2 ? py + 16 : py - 40;
+    chip.append('rect').attr('x', cx).attr('y', cy).attr('width', tw).attr('height', 26).attr('rx', 5);
+    chip.append('text').attr('x', cx + 8).attr('y', cy + 18).text(label);
+  }
+
+  const toData = ev => {
+    const [px, py] = d3.pointer(ev, svg.node());
+    return { T: Math.max(0, Math.min(2000, x.invert(px))), z: Math.max(0, Math.min(240, y.invert(py))) };
+  };
+  hit.call(d3.drag()
+    .on('start drag', ev => {
+      const d = toData(ev.sourceEvent);
+      if (onPick && ev.type === 'start') { onPick(d); return; }
+      if (onMove) { onMove(d); }
+    }));
+  hit.on('pointermove', ev => { if (onHover) onHover(toData(ev)); });
+  hit.on('pointerleave', () => { if (onHover) onHover(null); });
+
+  return {
+    render, x, y,
+    set onMove(f) { onMove = f; }, set onPick(f) { onPick = f; }, set onHover(f) { onHover = f; },
+  };
+}
+
+/* =========================================================
+   NAVIGATION
+   ========================================================= */
+const STEP_NAMES = ['Problème', 'Expérience', 'Diagramme', 'Comparer', 'Appliquer', 'Bilan'];
+const pages = [...document.querySelectorAll('.page')];
+const stepsEl = document.getElementById('steps');
+STEP_NAMES.forEach((n, i) => {
+  const li = document.createElement('li');
+  li.innerHTML = `<button class="step-tab" type="button" data-go="${i}"><span class="num">${i}</span>${n}</button>`;
+  stepsEl.appendChild(li);
+});
+function markDone(i) { S.done[i] = true; save(); paintSteps(); }
+function paintSteps() {
+  stepsEl.querySelectorAll('.step-tab').forEach((b, i) => {
+    b.toggleAttribute('aria-current', false);
+    if (i === S.step) b.setAttribute('aria-current', 'step');
+    b.classList.toggle('done', !!S.done[i] && i !== S.step);
+  });
+}
+const enterHooks = {};
+function go(i) {
+  S.step = Math.max(0, Math.min(pages.length - 1, i)); save();
+  pages.forEach((p, k) => p.hidden = k !== S.step);
+  paintSteps();
+  enterHooks[S.step]?.();
+  window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+}
+stepsEl.addEventListener('click', e => { const b = e.target.closest('[data-go]'); if (b) go(+b.dataset.go); });
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-next]')) { markDone(S.step); go(S.step + 1); }
+  if (e.target.closest('[data-prev]')) go(S.step - 1);
+});
+function segment(el, onChange) {
+  el.addEventListener('click', e => {
+    const b = e.target.closest('button[data-v]'); if (!b) return;
+    el.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    onChange(b.dataset.v);
+  });
+  return v => el.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.v === v)));
+}
+function fb(el, kind, html) { el.className = 'feedback ' + kind; el.innerHTML = html; }
+function celebrate() { if (window.confetti && !matchMedia('(prefers-reduced-motion: reduce)').matches) confetti({ particleCount: 70, spread: 60, origin: { y: 0.75 }, colors: ['#4f7a28', '#d2461b', '#1f69b0', '#a0622a'] }); }
+function hinter(btn, box, hints) {
+  let n = 0;
+  btn.addEventListener('click', () => {
+    if (n >= hints.length) n = hints.length - 1;
+    box.hidden = false;
+    box.innerHTML = `<b>Indice ${n + 1}/${hints.length}</b>${hints[n]}`;
+    n++;
+    if (n >= hints.length) btn.textContent = 'Revoir le dernier indice';
+  });
+}
+
+/* ---------- thème ---------- */
+// Le thème est stocké à part : « Tout recommencer » efface la progression mais garde le thème choisi.
+const themeBtn = document.getElementById('themeBtn');
+const sysDark = matchMedia('(prefers-color-scheme: dark)');
+const isDark = () => { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : sysDark.matches; };
+function paintThemeBtn() {
+  const dark = isDark();
+  document.getElementById('themeIcon').textContent = dark ? '☀' : '☾';
+  document.getElementById('themeLabel').textContent = dark ? 'Mode clair' : 'Mode sombre';
+  themeBtn.setAttribute('aria-label', dark ? 'Passer en mode clair' : 'Passer en mode sombre');
+  themeBtn.title = dark ? 'Mode clair' : 'Mode sombre';
+}
+themeBtn.addEventListener('click', () => {
+  const next = isDark() ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(STORE_KEY + '-theme', next); } catch (e) {}
+  paintThemeBtn();
+});
+sysDark.addEventListener?.('change', paintThemeBtn);
+paintThemeBtn();
+
+/* ---------- onglets (un groupe par étape, onglet actif mémorisé) ---------- */
+S.set.tabs = S.set.tabs || {};
+const tabsets = {};
+document.querySelectorAll('.tabset[data-tabs]').forEach(set => {
+  const id = set.dataset.tabs;
+  const btns = [...set.querySelectorAll(':scope > .tablist > .tab')];
+  const panels = [...set.querySelectorAll(':scope > .tabpanel')];
+  btns.forEach(b => { b.id = `tab-${id}-${b.dataset.tab}`; });
+  panels.forEach(p => { p.setAttribute('aria-labelledby', `tab-${id}-${p.dataset.panel}`); });
+  function select(name, focus) {
+    if (!btns.some(b => b.dataset.tab === name)) name = btns[0].dataset.tab;
+    btns.forEach(b => { const on = b.dataset.tab === name; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; if (on) { b.classList.remove('ready'); if (focus) b.focus(); } });
+    panels.forEach(p => { p.hidden = p.dataset.panel !== name; });
+    S.set.tabs[id] = name; save();
+  }
+  set.querySelector('.tablist').addEventListener('click', e => { const b = e.target.closest('.tab'); if (b) select(b.dataset.tab); });
+  set.querySelector('.tablist').addEventListener('keydown', e => {
+    const k = btns.findIndex(b => b.getAttribute('aria-selected') === 'true');
+    const d = { ArrowRight: 1, ArrowLeft: -1, Home: -k, End: btns.length - 1 - k }[e.key];
+    if (d === undefined) return;
+    e.preventDefault(); e.stopPropagation();
+    select(btns[(k + d + btns.length) % btns.length].dataset.tab, true);
+  });
+  select(S.set.tabs[id]);
+  tabsets[id] = { select, current: () => S.set.tabs[id], tab: name => btns.find(b => b.dataset.tab === name) };
+});
+
+/* ---------- plein écran ---------- */
+const fsBtn = document.getElementById('fsBtn');
+function paintFs() {
+  const on = !!document.fullscreenElement;
+  document.getElementById('fsLabel').textContent = on ? 'Quitter le plein écran' : 'Plein écran';
+  fsBtn.setAttribute('aria-label', on ? 'Quitter le plein écran' : 'Passer en plein écran');
+}
+fsBtn.addEventListener('click', () => {
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else document.documentElement.requestFullscreen?.().catch(() => {});
+});
+document.addEventListener('fullscreenchange', paintFs);
+paintFs();
+
+/* ---------- clavier / télécommande de présentation ----------
+   Page suivante / Page précédente : étape suivante / précédente (boutons d'une télécommande de diaporama).
+   Flèches gauche/droite : idem, sauf quand un champ, un curseur ou un groupe de boutons a le focus. */
+document.addEventListener('keydown', e => {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  const t = e.target, inField = t.closest?.('input, select, textarea, [contenteditable]');
+  let d = { PageDown: 1, PageUp: -1 }[e.key];
+  if (d === undefined && !inField && !t.closest?.('.tablist, .seg, .bank, .sentence, svg')) d = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+  if (d === undefined || (inField && (t.tagName === 'TEXTAREA' || t.type === 'range'))) return;
+  e.preventDefault();
+  go(S.step + d);
+});
+
+/* =========================================================
+   ÉTAPE 0 : hypothèse
+   ========================================================= */
+document.querySelectorAll('input[name="hyp"]').forEach(r => {
+  if (r.value === S.hyp) r.checked = true;
+  r.addEventListener('change', () => { S.hyp = r.value; save(); });
+});
+
+/* =========================================================
+   ÉTAPE 1 : laboratoire
+   ========================================================= */
+const lab = { sample: S.set.labSample };
+const labDia = Diagram(document.getElementById('labDia'), { label: 'Résultats des expériences de fusion' });
+const labP = document.getElementById('labP'), labT = document.getElementById('labT');
+labP.value = S.set.labP; labT.value = S.set.labT;
+segment(document.getElementById('labSample'), v => { lab.sample = S.set.labSample = v; save(); })(lab.sample);
+labP.addEventListener('change', () => { S.set.labP = +labP.value; save(); });
+labT.addEventListener('change', () => { S.set.labT = +labT.value; save(); });
+function labOutputs() {
+  const kb = +labP.value;
+  document.getElementById('labPOut').innerHTML = `${kb} kbar<small>≈ ${Math.round(kb * KM_PER_KBAR)} km</small>`;
+  document.getElementById('labTOut').innerHTML = `${(+labT.value).toLocaleString('fr-FR')} °C<small>&nbsp;</small>`;
+}
+labP.addEventListener('input', labOutputs); labT.addEventListener('input', labOutputs);
+
+function runPoints() {
+  return S.runs.map((r, i) => {
+    const st = stateOf(r.T, r.z, r.sample === 'wet' ? 1 : 0);
+    return { T: r.T, z: r.z, sample: r.sample, state: st.key, latest: i === S.runs.length - 1 && !r.ex };
+  });
+}
+function renderLab() {
+  labDia.render({ shade: null, dry: S.revealed, wet: S.revealed, h: 1, points: runPoints(), regionLabels: false });
+  document.getElementById('labCount').textContent = `${S.runs.length} expérience${S.runs.length > 1 ? 's' : ''}`;
+  document.getElementById('runsBadge').textContent = S.runs.length;
+  const body = document.getElementById('runsBody');
+  body.innerHTML = S.runs.map((r, i) => {
+    const st = stateOf(r.T, r.z, r.sample === 'wet' ? 1 : 0);
+    const c = r.sample === 'wet' ? 'var(--wet)' : 'var(--dry)';
+    return `<tr><td class="num">${i + 1}${r.ex ? ' <span class="tag">exemple</span>' : ''}</td>
+      <td><span class="swatch" style="background:${c}"></span> ${r.sample === 'wet' ? 'hydratée' : 'sèche'}</td>
+      <td class="num">${Math.round(zToKbar(r.z))}</td><td class="num">${Math.round(r.z)}</td><td class="num">${r.T}</td>
+      <td><span class="sym ${st.key === 'liquid' ? '' : st.key}" style="color:${c}"></span> ${STATE_LABEL[st.key]}${st.key === 'partial' ? ` <span class="mono" style="color:var(--muted)">(${pct(st.F)})</span>` : ''}</td></tr>`;
+  }).reverse().join('');
+  updateRevealState();
+}
+function revealReady() {
+  const ok = s => { const rs = S.runs.filter(r => r.sample === s).map(r => stateOf(r.T, r.z, s === 'wet' ? 1 : 0).key);
+    return { n: rs.length, solid: rs.includes('solid'), partial: rs.includes('partial') }; };
+  return { dry: ok('dry'), wet: ok('wet') };
+}
+function updateRevealState() {
+  const r = revealReady(), msg = [];
+  ['dry', 'wet'].forEach(s => {
+    const o = r[s], name = s === 'dry' ? 'sèche' : 'hydratée', miss = [];
+    if (o.n < 3) miss.push(`${3 - o.n} expérience(s) de plus`);
+    if (!o.solid) miss.push('un résultat solide');
+    if (!o.partial) miss.push('un résultat solide + liquide');
+    if (miss.length) msg.push(`Péridotite ${name} : il manque ${miss.join(', ')}.`);
+  });
+  const btn = document.getElementById('revealBtn');
+  btn.disabled = msg.length > 0 && !S.revealed;
+  btn.textContent = S.revealed ? 'Masquer les courbes' : 'Tracer les courbes expérimentales';
+  document.getElementById('revealMsg').textContent = S.revealed ? 'Tes points encadrent-ils bien chaque solidus ?' : msg.join(' ');
+}
+document.getElementById('revealBtn').addEventListener('click', () => { S.revealed = !S.revealed; save(); renderLab(); if (S.revealed) markDone(1); });
+document.getElementById('clearRuns').addEventListener('click', () => { S.runs = EXAMPLE_RUNS.slice(); S.revealed = false; save(); renderLab(); drawSection(null); });
+
+/* --- lame mince (Voronoï) --- */
+const scope = document.getElementById('scope'), sctx = scope.getContext('2d');
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const GRAINS = (() => {
+  const R = rng(7), pts = [], N = 9, W = 500;
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) pts.push([(i + 0.15 + R() * 0.7) * W / N, (j + 0.15 + R() * 0.7) * W / N]);
+  const vor = d3.Delaunay.from(pts).voronoi([0, 0, W, W]);
+  return pts.map((p, i) => {
+    const u = R();
+    const min = u < 0.58 ? 'ol' : u < 0.82 ? 'opx' : u < 0.97 ? 'cpx' : 'sp';
+    const poly = vor.cellPolygon(i);
+    const c = d3.polygonCentroid(poly);
+    return { min, poly, c, shade: R() };
+  });
+})();
+const MIN_COL = { ol: [185, 207, 138], opx: [216, 199, 160], cpx: [111, 174, 106], sp: [42, 30, 20] };
+function remaining(F) {
+  const cpx = Math.max(0, 1 - F / 0.22);
+  const opx = Math.max(0, 1 - Math.max(0, F - 0.05) / 0.55);
+  const sp = F > 0.9 ? 0 : 1;
+  const ol = Math.max(0, Math.min(1, (1 - F - 0.25 * opx - 0.15 * cpx - 0.02 * sp) / 0.58));
+  return { ol, opx, cpx, sp };
+}
+function drawSection(run) {
+  const W = 500, c = sctx;
+  c.save(); c.clearRect(0, 0, W, W);
+  c.beginPath(); c.arc(W / 2, W / 2, W / 2, 0, Math.PI * 2); c.clip();
+  if (!run) {
+    c.fillStyle = '#16140f'; c.fillRect(0, 0, W, W);
+    c.fillStyle = '#8d8a80'; c.font = '600 36px "Source Sans 3", sans-serif'; c.textAlign = 'center';
+    c.fillText('Aucun échantillon', W / 2, W / 2 - 10);
+    c.font = '28px "Source Sans 3", sans-serif'; c.fillText('lance une expérience', W / 2, W / 2 + 30);
+    c.restore(); document.getElementById('scopeCap').textContent = 'Lame mince après trempe (LPNA)'; return;
+  }
+  const st = stateOf(run.T, run.z, run.sample === 'wet' ? 1 : 0), F = st.F, rem = remaining(F);
+  c.fillStyle = F > 0 ? '#c27b2e' : '#2b241b'; c.fillRect(0, 0, W, W);
+  if (F > 0) { // texture du verre
+    const R = rng(11); c.globalAlpha = 0.25;
+    for (let i = 0; i < 140; i++) { c.fillStyle = R() > 0.5 ? '#a5631f' : '#d89548'; c.beginPath(); c.arc(R() * W, R() * W, 6 + R() * 26, 0, 7); c.fill(); }
+    c.globalAlpha = 1;
+  }
+  GRAINS.forEach(g => {
+    const s = Math.sqrt(rem[g.min]); if (s <= 0.02) return;
+    const poly = g.min === 'sp' ? g.poly.map(p => [g.c[0] + (p[0] - g.c[0]) * 0.35, g.c[1] + (p[1] - g.c[1]) * 0.35])
+      : g.poly.map(p => [g.c[0] + (p[0] - g.c[0]) * s, g.c[1] + (p[1] - g.c[1]) * s]);
+    const [r, gg, b] = MIN_COL[g.min], k = 0.88 + g.shade * 0.2;
+    c.fillStyle = `rgb(${r * k | 0},${gg * k | 0},${b * k | 0})`;
+    c.beginPath(); poly.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.closePath(); c.fill();
+    c.strokeStyle = 'rgba(30,24,16,.75)'; c.lineWidth = F > 0 ? 2 : 2.4; c.stroke();
+    if (g.min !== 'sp') { // clivages / fractures
+      c.strokeStyle = 'rgba(40,36,25,.25)'; c.lineWidth = 1; const R = rng(g.c[0] | 0);
+      for (let i = 0; i < 2; i++) { c.beginPath(); c.moveTo(g.c[0] + (R() - .5) * 30 * s, g.c[1] + (R() - .5) * 30 * s); c.lineTo(g.c[0] + (R() - .5) * 40 * s, g.c[1] + (R() - .5) * 40 * s); c.stroke(); }
+    }
+  });
+  if (F > 0 && run.sample === 'wet') { // vésicules : l'eau dissoute dans le liquide s'exsolve
+    const R = rng(23); c.strokeStyle = 'rgba(255,240,220,.7)'; c.lineWidth = 1.5;
+    for (let i = 0; i < 26 + F * 40; i++) { const px = R() * W, py = R() * W; c.beginPath(); c.arc(px, py, 2 + R() * 5, 0, 7); c.stroke(); }
+  }
+  c.restore();
+  // réticule
+  c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = 1;
+  c.beginPath(); c.moveTo(W / 2, 30); c.lineTo(W / 2, W - 30); c.moveTo(30, W / 2); c.lineTo(W - 30, W / 2); c.stroke();
+  document.getElementById('scopeCap').textContent = `${SAMPLE_LABEL[run.sample]} · ${Math.round(zToKbar(run.z))} kbar · ${run.T} °C`;
+}
+
+let running = false;
+document.getElementById('runBtn').addEventListener('click', () => {
+  if (running) return;
+  const run = { sample: lab.sample, z: +labP.value * KM_PER_KBAR, T: +labT.value };
+  const prog = document.getElementById('runProgress'), bar = prog.querySelector('i'), txt = prog.querySelector('small');
+  const phases = ['Mise sous pression…', 'Chauffage…', 'Palier de température (quelques heures)…', 'Trempe : refroidissement brutal…', 'Préparation de la lame mince…'];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  running = true; prog.hidden = false; document.getElementById('runBtn').disabled = true;
+  let k = 0;
+  const tick = () => {
+    if (k < phases.length) { txt.textContent = phases[k]; bar.style.width = ((k + 1) / phases.length * 100) + '%'; k++; setTimeout(tick, reduce ? 0 : 330); return; }
+    running = false; prog.hidden = true; bar.style.width = '0'; document.getElementById('runBtn').disabled = false;
+    S.runs.push(run); if (S.runs.length > 40) S.runs.splice(EXAMPLE_RUNS.length, 1); save();
+    drawSection(run); renderLab();
+    const st = stateOf(run.T, run.z, run.sample === 'wet' ? 1 : 0);
+    const el = document.getElementById('runResult');
+    const where = `${SAMPLE_LABEL[run.sample]}, ${Math.round(zToKbar(run.z))} kbar (≈ ${Math.round(run.z)} km), ${run.T} °C`;
+    if (st.key === 'solid') fb(el, 'info', `<b>Solide.</b> ${where} : la lame ne montre que des cristaux jointifs, sans verre. Il n'y a pas eu de fusion.`);
+    else if (st.key === 'partial') fb(el, 'ok', `<b>Fusion partielle : environ ${pct(st.F)} de liquide.</b> ${where} : du verre (liquide figé par la trempe) apparaît entre les cristaux. ${st.F < 0.25 ? 'Le clinopyroxène est consommé en premier.' : 'L’olivine résiste le plus longtemps.'}${run.sample === 'wet' ? ' Les bulles du verre sont de l’eau qui s’est échappée du liquide.' : ''}`);
+    else fb(el, 'bad', `<b>Fusion totale.</b> ${where} : la lame ne contient plus que du verre. Cette situation ne se produit pas dans le manteau.`);
+  };
+  tick();
+});
+
+/* =========================================================
+   ÉTAPE 2 : exploration + tableau
+   ========================================================= */
+const ex = { sample: S.set.exSample, h: S.set.exH, probe: { ...S.set.exProbe }, geo: S.set.exGeo };
+const exDia = Diagram(document.getElementById('exDia'));
+const POINTS = [
+  { id: 'A', sample: 'dry', T: 800, z: 50 },
+  { id: 'B', sample: 'dry', T: 1200, z: 100 },
+  { id: 'C', sample: 'dry', T: 1600, z: 100 },
+  { id: 'D', sample: 'dry', T: 1900, z: 50 },
+  { id: 'E', sample: 'wet', T: 800, z: 50 },
+  { id: 'F', sample: 'wet', T: 900, z: 100 },
+  { id: 'G', sample: 'wet', T: 1000, z: 150 },
+  { id: 'H', sample: 'wet', T: 700, z: 100 },
+];
+const setExSeg = segment(document.getElementById('exSample'), v => { ex.sample = v; renderEx(); });
+setExSeg(ex.sample);
+document.getElementById('exGeo').checked = ex.geo;
+document.getElementById('exGeo').addEventListener('change', e => { ex.geo = e.target.checked; renderEx(); });
+const exH = document.getElementById('exH');
+exH.value = Math.round(ex.h * 100);
+let exSaveTimer;
+function saveEx() { // regroupe les enregistrements pendant qu'on fait glisser le point
+  Object.assign(S.set, { exSample: ex.sample, exH: ex.h, exGeo: ex.geo, exProbe: { ...ex.probe } });
+  clearTimeout(exSaveTimer);
+  exSaveTimer = setTimeout(save, 250);
+}
+window.addEventListener('pagehide', save);
+exH.addEventListener('input', () => { ex.h = +exH.value / 100; renderEx(); });
+exDia.onMove = d => { ex.probe = { T: Math.round(d.T / 5) * 5, z: Math.round(d.z) }; renderEx(); };
+
+function renderEx() {
+  const active = ex.sample === 'both' ? 'wet' : ex.sample;
+  const h = active === 'wet' ? ex.h : 0;
+  exDia.render({
+    shade: ex.sample === 'both' ? null : active, h: ex.h,
+    dry: ex.sample !== 'wet', wet: ex.sample !== 'dry', wetLiq: ex.sample === 'wet',
+    geoSub: ex.geo, probe: ex.probe,
+    points: POINTS.filter(p => ex.sample === 'both' || p.sample === ex.sample).map(p => ({ ...p, kind: 'letter' })),
+  });
+  const { T, z } = ex.probe, st = stateOf(T, z, h);
+  document.getElementById('exT').textContent = fmtT(T);
+  document.getElementById('exZ').textContent = Math.round(z) + ' km';
+  document.getElementById('exP').textContent = fmtKbar(z);
+  const pill = document.getElementById('exPill'); pill.className = 'state-pill ' + st.key; pill.textContent = STATE_LABEL[st.key];
+  document.getElementById('exF').textContent = pct(st.F);
+  document.getElementById('exFBar').style.width = (st.F * 100) + '%';
+  document.getElementById('exSampleName').textContent = ex.sample === 'both' ? 'état lu pour : péridotite hydratée' : SAMPLE_LABEL[active] + (active === 'wet' && ex.h < 1 ? ` (${Math.round(ex.h * 100)} % de la saturation)` : '');
+  const s = solidus(z, h), l = liquidus(z, h), sd = solidus(z, 0), sw = solidus(z, 1);
+  let msg;
+  if (ex.sample === 'both') msg = `À ${Math.round(z)} km, le solidus sec est à ${fmtT(sd)} et le solidus hydraté à ${fmtT(sw)} : l'eau abaisse le début de la fusion d'environ ${Math.round((sd - sw) / 10) * 10} °C.`;
+  else if (st.key === 'solid') msg = `Le point est à gauche du solidus (${fmtT(s)} à cette profondeur) : la roche reste solide.`;
+  else if (st.key === 'partial') msg = `Le point est entre le solidus (${fmtT(s)}) et le liquidus (${fmtT(l)}) : fusion partielle. Le liquide formé est un magma.`;
+  else msg = `Le point est à droite du liquidus (${fmtT(l)}) : fusion totale. Ces conditions n'existent pas dans le manteau actuel.`;
+  document.getElementById('exMsg').textContent = msg;
+  document.getElementById('hydRow').hidden = ex.sample !== 'wet';
+  document.getElementById('hydNote').hidden = ex.sample !== 'wet';
+  document.getElementById('exHOut').innerHTML = ex.h >= 1 ? 'saturée' : ex.h === 0 ? 'sèche' : Math.round(ex.h * 100) + ' %';
+  const leg = [];
+  if (ex.sample !== 'both') leg.push('<span><i class="box" style="background:var(--reg-solid)"></i> solide</span><span><i class="box" style="background:var(--reg-partial)"></i> solide + liquide</span><span><i class="box" style="background:var(--reg-liquid)"></i> liquide</span>');
+  if (ex.sample !== 'wet') leg.push('<span><i style="border-color:var(--dry)"></i> solidus sec</span><span><i class="dash" style="border-color:var(--dry)"></i> liquidus sec</span>');
+  if (ex.sample !== 'dry') leg.push('<span><i style="border-color:var(--wet)"></i> solidus hydraté</span>');
+  if (ex.sample === 'wet') leg.push('<span><i class="dash" style="border-color:var(--wet);border-top-style:dotted"></i> liquidus hydraté (estimé)</span>');
+  if (ex.geo) leg.push('<span><i style="border-color:var(--geo)"></i> géotherme de subduction</span>');
+  document.getElementById('exLegend').innerHTML = leg.join('');
+  saveEx();
+}
+
+const ptsBody = document.getElementById('ptsBody');
+ptsBody.innerHTML = POINTS.map(p => `<tr>
+  <td><button class="goto" type="button" data-pt="${p.id}" title="Placer le curseur sur ${p.id}">${p.id}</button></td>
+  <td><span class="swatch" style="background:var(--${p.sample})"></span> ${p.sample === 'wet' ? 'hydratée' : 'sèche'}</td>
+  <td class="num">${p.T}</td><td class="num">${p.z}</td>
+  <td><input type="number" step="0.5" id="p-${p.id}" placeholder="?" aria-label="Pression du point ${p.id} en kbar"></td>
+  <td><select id="s-${p.id}" aria-label="État au point ${p.id}"><option value="">—</option><option value="solid">Solide</option><option value="partial">Solide + liquide</option><option value="liquid">Liquide</option></select></td>
+</tr>`).join('');
+POINTS.forEach(p => {
+  const pi = document.getElementById('p-' + p.id), si = document.getElementById('s-' + p.id);
+  const saved = S.table[p.id] || {};
+  if (saved.p != null) pi.value = saved.p; if (saved.s) si.value = saved.s;
+  const keep = () => { S.table[p.id] = { p: pi.value, s: si.value }; save(); pi.classList.remove('is-ok', 'is-bad'); si.classList.remove('is-ok', 'is-bad'); };
+  pi.addEventListener('input', keep); si.addEventListener('change', keep);
+});
+ptsBody.addEventListener('click', e => {
+  const b = e.target.closest('[data-pt]'); if (!b) return;
+  const p = POINTS.find(q => q.id === b.dataset.pt);
+  ex.sample = p.sample; ex.h = 1; exH.value = 100; setExSeg(p.sample);
+  ex.probe = { T: p.T, z: p.z }; renderEx();
+});
+document.getElementById('checkPts').addEventListener('click', () => {
+  let ok = 0, n = 0; const wrong = [];
+  POINTS.forEach(p => {
+    const pi = document.getElementById('p-' + p.id), si = document.getElementById('s-' + p.id);
+    const expP = zToKbar(p.z), expS = stateOf(p.T, p.z, p.sample === 'wet' ? 1 : 0).key;
+    const gp = parseFloat(String(pi.value).replace(',', '.'));
+    const okP = Math.abs(gp - expP) <= 1.5, okS = si.value === expS;
+    pi.classList.toggle('is-ok', okP); pi.classList.toggle('is-bad', !okP);
+    si.classList.toggle('is-ok', okS); si.classList.toggle('is-bad', !okS);
+    ok += okP + okS; n += 2; if (!okP || !okS) wrong.push(p.id);
+  });
+  const el = document.getElementById('ptsFb');
+  if (ok === n) { fb(el, 'ok', `<b>${ok}/${n} : tout est juste.</b> Compare B et F : à 100 km, la péridotite sèche est encore solide à 1 200 °C, alors que la péridotite hydratée fond déjà partiellement à 900 °C.`); markDone(2); celebrate(); }
+  else fb(el, 'bad', `<b>${ok}/${n}.</b> À revoir : point${wrong.length > 1 ? 's' : ''} ${wrong.join(', ')}. Place le curseur sur le point et regarde de quel côté du solidus il se trouve.`);
+});
+hinter(document.getElementById('hintPts'), document.getElementById('ptsHint'), [
+  'La pression se calcule à partir de la profondeur : divise la profondeur par 3,3. Tu peux aussi la lire sur l’axe de droite.',
+  'Pour l’état : compare la température du point à celle du solidus, à la même profondeur. À gauche du solidus, la roche est solide.',
+  'Exemple : pour A, 50 ÷ 3,3 ≈ 15 kbar. À 50 km, le solidus sec est vers 1 270 °C, et 800 °C est plus froid : A est solide.',
+]);
+
+/* =========================================================
+   ÉTAPE 3 : comparer
+   ========================================================= */
+const cmpDia = Diagram(document.getElementById('cmpDia'));
+function renderCmp() { cmpDia.render({ shade: null, dry: true, wet: true, h: 1, probe: null, points: [] }); }
+cmpDia.onHover = d => {
+  const r = document.getElementById('cmpRead');
+  if (!d) { r.textContent = '—'; return; }
+  r.textContent = `${Math.round(d.z)} km : solidus sec ${Math.round(solidus(d.z, 0))} °C · hydraté ${Math.round(solidus(d.z, 1))} °C`;
+};
+cmpDia.onMove = cmpDia.onHover;
+const CMP_IDS = ['c-t-dry', 'c-t-wet', 'c-p-dry', 'c-p-wet', 'c-w'];
+CMP_IDS.forEach(id => { const el = document.getElementById(id); if (S.cmp[id]) el.value = S.cmp[id];
+  el.addEventListener('input', () => { S.cmp[id] = el.value; save(); el.classList.remove('is-ok', 'is-bad'); }); });
+document.getElementById('checkCmp').addEventListener('click', () => {
+  const v = id => document.getElementById(id).value;
+  const sd = solidus(100, 0), sw = solidus(100, 1);
+  const res = {
+    'c-t-dry': Math.abs(+v('c-t-dry') - sd) <= 100 && v('c-t-dry') !== '',
+    'c-t-wet': Math.abs(+v('c-t-wet') - sw) <= 100 && v('c-t-wet') !== '',
+    'c-p-dry': v('c-p-dry') === 'aug',
+    'c-p-wet': v('c-p-wet') === 'dim',
+    'c-w': v('c-w') === 'easy',
+  };
+  let ok = 0;
+  Object.entries(res).forEach(([id, good]) => { const el = document.getElementById(id); el.classList.toggle('is-ok', good); el.classList.toggle('is-bad', !good); ok += good; });
+  const el = document.getElementById('cmpFb');
+  if (ok === 5) { fb(el, 'ok', `<b>5/5.</b> À 100 km : ≈ ${Math.round(sd / 10) * 10} °C (sèche) contre ≈ ${Math.round(sw / 10) * 10} °C (hydratée), soit un écart d'environ ${Math.round((sd - sw) / 50) * 50} °C. Attention : la pression n'agit pas de la même façon sur les deux solidus. Entre 0 et 80 km, le solidus hydraté s'abaisse quand la profondeur augmente, car l'eau se dissout mieux dans le liquide sous pression.`); markDone(3); celebrate(); }
+  else {
+    let extra = '';
+    if (!res['c-p-wet'] && v('c-p-wet') === 'aug') extra = ' Regarde bien la courbe bleue entre 0 et 80 km : vers où va-t-elle quand on descend ?';
+    fb(el, 'bad', `<b>${ok}/5.</b> Les cases rouges sont à revoir.${extra}`);
+  }
+});
+hinter(document.getElementById('hintCmp'), document.getElementById('cmpHint'), [
+  'Survole le diagramme à la profondeur 100 km : la lecture des deux solidus s’affiche en haut à droite.',
+  'Pour l’effet de la pression, suis chaque solidus du haut (0 km) vers 80 km. La courbe part-elle vers la droite (plus chaud) ou vers la gauche (plus froid) ?',
+  'Un solidus plus à gauche veut dire que la roche commence à fondre à une température plus basse.',
+]);
+const oicText = document.getElementById('oicText');
+oicText.value = S.oic || '';
+oicText.addEventListener('input', () => { S.oic = oicText.value; save(); });
+document.getElementById('showModel').addEventListener('click', () => {
+  const msg = document.getElementById('modelMsg');
+  if (oicText.value.trim().length < 40) { msg.textContent = 'Rédige d’abord ta propre réponse (au moins deux phrases).'; return; }
+  msg.textContent = '';
+  const box = document.getElementById('modelAnswer'); box.hidden = false;
+  box.innerHTML = `<p class="o"><b>Observation</b> : à 100 km de profondeur, le solidus de la péridotite sèche se situe vers ${Math.round(solidus(100, 0) / 10) * 10} °C, alors que celui de la péridotite hydratée se situe vers ${Math.round(solidus(100, 1) / 10) * 10} °C.</p>
+    <p class="i"><b>Interprétation</b> : la présence d'eau abaisse la température de début de fusion de la péridotite d'environ ${Math.round((solidus(100, 0) - solidus(100, 1)) / 50) * 50} °C.</p>
+    <p class="c"><b>Conclusion</b> : l'hydratation de la péridotite facilite sa fusion partielle : elle peut fondre à des températures où la péridotite sèche reste solide.</p>
+    <p style="padding-left:0;font-size:.9rem;color:var(--muted)">Vérifie : as-tu cité deux valeurs avec leur unité, utilisé le mot « solidus » et parlé de fusion <b>partielle</b> ?</p>`;
+});
+
+/* =========================================================
+   ÉTAPE 4 : contextes
+   ========================================================= */
+const ctx = { which: S.set.ctxWhich, pick: null, solvedSub: !!S.done['4sub'], solvedRidge: !!S.done['4ridge'] };
+const ctxDia = Diagram(document.getElementById('ctxDia'), { label: 'Géotherme de subduction ou de dorsale comparé aux solidus de la péridotite' });
+segment(document.getElementById('ctxSel'), v => { ctx.which = S.set.ctxWhich = v; ctx.pick = null; save(); renderCtx(); })(ctx.which);
+ctxDia.onPick = d => { ctx.pick = d; checkCtx(); renderCtx(); };
+function renderCtx() {
+  const sub = ctx.which === 'sub';
+  ctxDia.render({
+    shade: null, dry: true, wet: true, h: 1, curves: true,
+    geoSub: sub, geoRidge: !sub, magma: sub && ctx.solvedSub,
+    pick: ctx.pick, target: sub ? (ctx.solvedSub ? SUB_X : null) : (ctx.solvedRidge ? RIDGE_X : null),
+    points: [], probe: null,
+  });
+  document.getElementById('ctxTaskSub').hidden = !sub;
+  document.getElementById('ctxTaskRidge').hidden = sub;
+  const bothSolved = ctx.solvedSub && ctx.solvedRidge;
+  document.getElementById('ctxCompare').hidden = !bothSolved;
+  document.getElementById('ctxLocked').hidden = bothSolved;
+  document.getElementById('ctxRead').textContent = ctx.pick ? `${Math.round(ctx.pick.T)} °C · ${Math.round(ctx.pick.z)} km` : 'Clique sur le diagramme';
+  document.getElementById('ctxLegend').innerHTML = `<span><i style="border-color:var(--dry)"></i> solidus sec</span><span><i style="border-color:var(--wet)"></i> solidus hydraté</span>` +
+    (sub ? `<span><i style="border-color:var(--geo)"></i> géotherme de subduction</span>` : `<span><i style="border-color:var(--ridge)"></i> géotherme de dorsale</span>`) +
+    (sub && ctx.solvedSub ? `<span><i class="box" style="background:var(--magma);opacity:.4"></i> zone de fusion partielle</span>` : '');
+  document.getElementById('sumSub').textContent = `≈ ${Math.round(SUB_X.z / 5) * 5} km, ${Math.round(SUB_X.T / 10) * 10} °C`;
+  document.getElementById('sumRidge').textContent = `≈ ${Math.round(RIDGE_X.z / 5) * 5} km, ${Math.round(RIDGE_X.T / 10) * 10} °C`;
+}
+function checkCtx() {
+  const sub = ctx.which === 'sub', X = sub ? SUB_X : RIDGE_X, d = ctx.pick;
+  const el = document.getElementById(sub ? 'subFb' : 'ridgeFb');
+  const close = Math.abs(d.z - X.z) <= 18 && Math.abs(d.T - X.T) <= 110;
+  if (close) {
+    if (sub) { ctx.solvedSub = true; S.done['4sub'] = true;
+      fb(el, 'ok', `<b>Exact : vers ${Math.round(X.z / 5) * 5} km et ${Math.round(X.T / 10) * 10} °C.</b> Le géotherme de subduction reste à gauche du solidus sec : la péridotite sèche ne fondrait jamais. Il recoupe le solidus <b>hydraté</b> : la péridotite hydratée du coin du manteau subit une fusion partielle (zone orange). Passe maintenant à la dorsale.`);
+    } else { ctx.solvedRidge = true; S.done['4ridge'] = true;
+      fb(el, 'ok', `<b>Exact : vers ${Math.round(X.z / 5) * 5} km et ${Math.round(X.T / 10) * 10} °C.</b> Le manteau qui remonte garde presque sa température, mais sa pression diminue. Il recoupe le solidus <b>sec</b> : c'est une fusion partielle par <b>décompression</b>, sans apport d'eau.`);
+    }
+    save(); if (ctx.solvedSub && ctx.solvedRidge) { markDone(4); celebrate(); if (tabsets.s4.current() !== 'sum') tabsets.s4.tab('sum').classList.add('ready'); }
+  } else {
+    const onDry = Math.abs(d.T - solidus(d.z, 0)) < 60, onWet = Math.abs(d.T - solidus(d.z, 1)) < 60;
+    let tip = 'Le début de la fusion se trouve sur le géotherme, à l’endroit précis où il traverse un solidus.';
+    if (sub && onDry) tip = 'Ce point est sur le solidus sec, mais le géotherme de subduction ne l’atteint jamais. Cherche un autre croisement.';
+    if (!sub && onWet) tip = 'Sous une dorsale, la péridotite est sèche. Cherche le croisement avec le solidus sec.';
+    fb(el, 'bad', `<b>Pas tout à fait.</b> ${tip}`);
+  }
+}
+hinter(document.getElementById('hintSub'), document.getElementById('subHint'), [
+  'Suis la courbe noire du géotherme depuis la surface vers la profondeur.',
+  'Le géotherme croise-t-il la courbe brune (sèche) ? Et la courbe bleue (hydratée) ?',
+  'Le croisement se situe entre 70 et 100 km de profondeur.',
+]);
+hinter(document.getElementById('hintRidge'), document.getElementById('ridgeHint'), [
+  'Sous une dorsale, le manteau monte depuis la profondeur : lis la courbe violette de bas en haut.',
+  'Pendant la remontée, à quel moment la courbe violette passe-t-elle à droite du solidus sec ?',
+  'Le croisement se situe entre 60 et 90 km de profondeur.',
+]);
+
+/* =========================================================
+   ÉTAPE 5 : quiz
+   ========================================================= */
+const QUIZ = [
+  { q: 'La péridotite fond à une température unique, comme la glace à 0 °C.', o: ['Vrai', 'Faux'], a: 1,
+    why: 'Faux. C’est une roche faite de plusieurs minéraux : elle fond progressivement entre le solidus et le liquidus.' },
+  { q: 'Un point du diagramme situé entre le solidus et le liquidus correspond à…', o: ['une roche entièrement solide', 'une fusion partielle : cristaux + liquide', 'une fusion totale'], a: 1,
+    why: 'Entre les deux courbes, des cristaux et du liquide magmatique coexistent : c’est la fusion partielle.' },
+  { q: 'En zone de subduction, la roche qui fond pour donner le magma est surtout…', o: ['la croûte océanique de la plaque plongeante', 'la péridotite du manteau situé au-dessus de la plaque plongeante', 'la croûte continentale'], a: 1,
+    why: 'La plaque plongeante libère de l’eau. C’est la péridotite du coin du manteau, hydratée par cette eau, qui fond partiellement.' },
+  { q: 'L’eau qui hydrate le manteau en zone de subduction provient…', o: ['de l’eau de mer qui s’infiltre directement jusqu’à 100 km', 'de la déshydratation des minéraux hydroxylés de la plaque plongeante lors de son métamorphisme', 'de la fusion des glaciers'], a: 1,
+    why: 'Avec l’augmentation de P et T, les minéraux hydratés de la croûte océanique (amphibole, chlorite…) se transforment et libèrent de l’eau.' },
+  { q: 'Sous une dorsale, la fusion partielle de la péridotite est surtout due à…', o: ['un apport d’eau', 'une baisse de pression lors de la remontée du manteau (décompression)', 'une augmentation de pression'], a: 1,
+    why: 'Le manteau chaud remonte presque sans se refroidir. La pression diminue et il franchit le solidus sec.' },
+  { q: 'À 100 km de profondeur, l’eau abaisse le début de fusion de la péridotite d’environ…', o: ['50 °C', '600 °C', '1 500 °C'], a: 1,
+    why: `D’après le diagramme : ≈ ${Math.round(solidus(100, 0) / 10) * 10} °C (sèche) contre ≈ ${Math.round(solidus(100, 1) / 10) * 10} °C (hydratée).` },
+];
+const quizEl = document.getElementById('quiz');
+quizEl.innerHTML = QUIZ.map((it, i) => `<div class="q" id="q${i}"><h3>${i + 1}. ${it.q}</h3><div class="opts">${it.o.map((o, j) =>
+  `<label><input type="radio" name="qq${i}" value="${j}" ${S.quiz[i] == j ? 'checked' : ''}> <span>${o}</span></label>`).join('')}</div><p class="why" hidden></p></div>`).join('');
+quizEl.addEventListener('change', e => { const m = e.target.name?.match(/^qq(\d+)/); if (m) { S.quiz[m[1]] = +e.target.value; save(); } });
+document.getElementById('checkQuiz').addEventListener('click', () => {
+  let score = 0;
+  QUIZ.forEach((it, i) => {
+    const box = document.getElementById('q' + i);
+    box.querySelectorAll('label').forEach((l, j) => { l.classList.remove('ok', 'bad'); if (j === it.a) l.classList.add('ok'); });
+    const sel = box.querySelector('input:checked');
+    if (sel && +sel.value === it.a) score++; else if (sel) sel.closest('label').classList.add('bad');
+    const w = box.querySelector('.why'); w.hidden = false; w.textContent = it.why;
+  });
+  document.getElementById('quizScore').textContent = `Score : ${score} / ${QUIZ.length}`;
+  if (score === QUIZ.length) { markDone(5); celebrate(); }
+});
+/* --- conclusion à reconstruire (l'ordre compte) --- */
+const CONC_OK = ['La plaque plongeante', 'subit un métamorphisme et libère de l’eau,', 'qui hydrate la péridotite du manteau sus-jacent', 'et abaisse son solidus ;', 'le géotherme recoupe alors ce solidus', 'et la péridotite subit une fusion partielle', 'qui produit le magma du volcanisme d’arc.'];
+const CONC_TRAPS = ['et élève son solidus ;', 'et la péridotite fond totalement', 'La péridotite sèche'];
+const CONC_ALL = (() => { const a = [...CONC_OK, ...CONC_TRAPS], R = rng(5); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; })();
+let conc = Array.isArray(S.conc) ? S.conc.filter(t => CONC_ALL.includes(t)) : [];
+function renderConc() {
+  const sent = document.getElementById('concSentence'), bank = document.getElementById('concBank');
+  sent.innerHTML = conc.map((t, i) => `<button class="chipw" type="button" data-i="${i}">${t}</button>`).join('');
+  bank.innerHTML = CONC_ALL.filter(t => !conc.includes(t)).map(t => `<button class="chipw" type="button">${t}</button>`).join('');
+}
+document.getElementById('concBank').addEventListener('click', e => { const b = e.target.closest('.chipw'); if (!b) return; conc.push(b.textContent); S.conc = conc; save(); renderConc(); });
+document.getElementById('concSentence').addEventListener('click', e => { const b = e.target.closest('.chipw'); if (!b) return; conc.splice(+b.dataset.i, 1); S.conc = conc; save(); renderConc(); });
+document.getElementById('resetConc').addEventListener('click', () => { conc = []; S.conc = conc; save(); renderConc(); document.getElementById('concFb').innerHTML = ''; });
+document.getElementById('checkConc').addEventListener('click', () => {
+  const el = document.getElementById('concFb');
+  const trap = conc.find(t => CONC_TRAPS.includes(t));
+  const chips = document.querySelectorAll('#concSentence .chipw');
+  chips.forEach(c => c.classList.remove('is-bad'));
+  if (trap) {
+    chips[conc.indexOf(trap)].classList.add('is-bad');
+    const why = { 'et élève son solidus ;': 'L’eau abaisse le solidus, elle ne l’élève pas.', 'et la péridotite fond totalement': 'Dans le manteau, la fusion est toujours partielle.', 'La péridotite sèche': 'Le géotherme de subduction n’atteint jamais le solidus sec.' }[trap];
+    fb(el, 'bad', `<b>Une étiquette est fausse : « ${trap} ».</b> ${why}`); return;
+  }
+  const firstWrong = conc.findIndex((t, i) => t !== CONC_OK[i]);
+  if (firstWrong === -1 && conc.length === CONC_OK.length) { fb(el, 'ok', '<b>Bravo, la chaîne logique est complète et dans le bon ordre.</b>'); celebrate(); return; }
+  if (firstWrong !== -1) { chips[firstWrong].classList.add('is-bad'); fb(el, 'bad', `<b>Les ${firstWrong} premier(s) élément(s) sont bien placés.</b> Le suivant n'est pas à sa place : demande-toi ce qui se passe juste après.`); return; }
+  fb(el, 'info', `<b>C'est bien parti (${conc.length}/${CONC_OK.length}).</b> Il manque la suite de la chaîne.`);
+});
+
+function renderBilan() {
+  const t = { eau: 'Tu avais proposé que l’eau libérée par la plaque plongeante abaisse la température de fusion. <b>Les expériences valident cette hypothèse.</b>',
+    pression: 'Tu avais proposé que la pression fasse fondre la péridotite. <b>Les expériences ne la valident pas</b> : une pression plus forte élève le solidus sec. C’est la <b>baisse</b> de pression qui provoque la fusion, sous les dorsales.',
+    chaleur: 'Tu avais proposé une température très élevée. <b>Les expériences ne la valident pas</b> : le géotherme de subduction est relativement froid et n’atteint jamais le solidus sec.' };
+  document.getElementById('hypBack').innerHTML = S.hyp ? t[S.hyp] : 'Retour à l’hypothèse : à l’étape 0, aucune hypothèse n’a été choisie.';
+}
+document.getElementById('resetAll').addEventListener('click', function () {
+  if (this.dataset.confirm !== '1') { this.dataset.confirm = '1'; this.textContent = 'Confirmer : tout effacer'; return; }
+  try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+  location.reload();
+});
+
+/* =========================================================
+   DÉMARRAGE
+   ========================================================= */
+enterHooks[1] = () => { renderLab(); };
+enterHooks[2] = renderEx;
+enterHooks[3] = renderCmp;
+enterHooks[4] = renderCtx;
+enterHooks[5] = renderBilan;
+labOutputs();
+drawSection(S.runs.length > EXAMPLE_RUNS.length ? S.runs[S.runs.length - 1] : null);
+renderLab(); renderEx(); renderCmp(); renderCtx(); renderBilan(); renderConc();
+go(S.step || 0);
+</script>
+</body>
+</html>

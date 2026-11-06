@@ -1,0 +1,71 @@
+{
+  "name": "fusion-peridotite",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "build:app": "node scripts/prepare.js",
+    "start": "node scripts/prepare.js && electron .",
+    "smoke": "node scripts/prepare.js && electron scripts/smoke.js app .cache/smoke",
+    "dist": "node scripts/prepare.js && electron-builder --win --x64"
+  },
+  "author": "SaaOma",
+  "description": "TP interactif : fusion partielle de la péridotite (2e année bac SVT)",
+  "devDependencies": {
+    "electron": "^41.7.1",
+    "electron-builder": "^25.1.8",
+    "@fontsource/bricolage-grotesque": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/source-sans-3": "^5.3.1",
+    "canvas-confetti": "^1.9.3",
+    "d3": "^7.9.0"
+  },
+  "productName": "Fusion de la péridotite",
+  "build": {
+    "appId": "ma.svt.fusion-peridotite",
+    "productName": "Fusion de la péridotite",
+    "copyright": "SaaOma",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "app/**/*",
+      "build/icon.png",
+      "!scripts/**",
+      "!.cache/**"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "Fusion-peridotite-${version}-portable.exe"
+    },
+    "nsis": {
+      "artifactName": "Fusion-peridotite-${version}-installation.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Fusion de la péridotite",
+      "language": "1036"
+    }
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

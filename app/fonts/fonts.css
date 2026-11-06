@@ -1,0 +1,64 @@
+/* bricolage-grotesque-latin-500-normal */
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url(./files/bricolage-grotesque-latin-500-normal.woff2) format('woff2'), url(./files/bricolage-grotesque-latin-500-normal.woff) format('woff');
+}
+/* bricolage-grotesque-latin-700-normal */
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url(./files/bricolage-grotesque-latin-700-normal.woff2) format('woff2'), url(./files/bricolage-grotesque-latin-700-normal.woff) format('woff');
+}
+/* source-sans-3-latin-400-normal */
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(./files/source-sans-3-latin-400-normal.woff2) format('woff2'), url(./files/source-sans-3-latin-400-normal.woff) format('woff');
+}
+/* source-sans-3-latin-600-normal */
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url(./files/source-sans-3-latin-600-normal.woff2) format('woff2'), url(./files/source-sans-3-latin-600-normal.woff) format('woff');
+}
+/* source-sans-3-latin-700-normal */
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url(./files/source-sans-3-latin-700-normal.woff2) format('woff2'), url(./files/source-sans-3-latin-700-normal.woff) format('woff');
+}
+/* source-sans-3-latin-400-italic */
+@font-face {
+  font-family: 'Source Sans 3';
+  font-style: italic;
+  font-display: swap;
+  font-weight: 400;
+  src: url(./files/source-sans-3-latin-400-italic.woff2) format('woff2'), url(./files/source-sans-3-latin-400-italic.woff) format('woff');
+}
+/* jetbrains-mono-latin-400-normal */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(./files/jetbrains-mono-latin-400-normal.woff2) format('woff2'), url(./files/jetbrains-mono-latin-400-normal.woff) format('woff');
+}
+/* jetbrains-mono-latin-600-normal */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url(./files/jetbrains-mono-latin-600-normal.woff2) format('woff2'), url(./files/jetbrains-mono-latin-600-normal.woff) format('woff');
+}
